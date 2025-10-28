@@ -1,0 +1,531 @@
+diff --git a/UNI16ARD-NAV-MX.ino b/SignalShift.ino
+similarity index 96%
+rename from UNI16ARD-NAV-MX.ino
+rename to SignalShift.ino
+index a36dd9a..c16c121 100644
+--- a/UNI16ARD-NAV-MX.ino
++++ b/SignalShift.ino
+@@ -16,35 +16,51 @@
+ 
+ const uint8_t SW_VERSION = 12;
+ 
++/* ------------ Supported CV numbers ------------------ */
+ const uint16_t CV_AUXILIARY_ACTIVATION = 2;
+ const uint8_t VALUE_AUXILIARY_ACTIVATION = 12;  // change this value to restore CV defaults after upload sketch
+ 
+ const uint16_t CV_DECODER_KEY = 15;
+-const uint8_t VALUE_DECODER_KEY = 0;        // unlocked decoder
+ const uint16_t CV_DECODER_LOCK = 16;
++const uint16_t CV_ROCO_ADDRESS = 34;
++const uint16_t CV_FADE_RATE = 39;
++const uint16_t CV_NUM_SIGNAL_NUMBER = 40;
++const uint16_t CV_ASPECT_LAG = 41;
++
++const uint16_t CV_PROD_ID_1 = 47;
++const uint16_t CV_PROD_ID_2 = 48;
++const uint16_t CV_PROD_ID_3 = 49;
++const uint16_t CV_PROD_ID_4 = 50;
++
++/* ------------- Default values for supported CVs ---------- */
++
++const uint8_t VALUE_AUXILIARY_ACTIVATION = 6;  // change this value to restore CV defaults after upload sketch
++const uint8_t VALUE_DECODER_KEY = 0;        // unlocked decoder
+ const uint8_t VALUE_DECODER_LOCK = 0;       // unlocked decoder
+ 
+-const uint16_t CV_ROCO_ADDRESS = 34;
+ const uint8_t VALUE_ROCO_ADDRESS = 1;      // 1 - ROCO address, 0 - LENZ address
+ const uint16_t CV_FADE_RATE = 39;
+ const uint8_t VALUE_FADE_RATE = 6;       // 0 - 7
+ const uint16_t CV_NUM_SIGNAL_NUMBER = 40;
+ const uint8_t VALUE_NUM_SIGNAL_NUMBER = 8;       // 1 - 8 
+-const uint16_t CV_ASPECT_LAG = 41;
+ const uint8_t VALUE_ASPECT_LAG = 1;       // 0 - 255   LAG × 0,128 s
+ 
+-const uint16_t CV_PROD_ID_1 = 47;
+ const uint8_t VALUE_PROD_ID_1 = 1;              // productID #1  
+-const uint16_t CV_PROD_ID_2 = 48;
+ const uint8_t VALUE_PROD_ID_2 = 1;              // productID #2
+-const uint16_t CV_PROD_ID_3 = 49;
+ const uint8_t VALUE_PROD_ID_3 = 1;              // productID #3
+-const uint16_t CV_PROD_ID_4 = 50;
+ const uint8_t VALUE_PROD_ID_4 = 4;              // productID #4
+ 
+ const byte ACK_BUSY_PIN = 13;
+ 
+ const int NUM_OUTPUTS = 16;
++
++/**
++ * Maximum possible outputs (lights) for a single mast. The value here affects the CV layout: for each Mast,
++ * a consecutive CV list specifies physical outputs of individual Mast lights. Changing the value here will
++ * damage existing decoder configurations as the CVs will be shifted.
++ */
++const int maxOutputsPerMast = 10;
++
+ const int NUM_SIGNAL_MAST = 8;
+ 
+ const int SEGMENT_SIZE = 13;
+@@ -83,12 +99,37 @@ int posNumber[40] ;
+ const byte OUTPUT_PIN[] = { 19, 18,  9,  8,  7,  6,  5,  4, 10, 11, 12,  3, 14, 15, 16, 17 };
+ //   pins                   A5  A4  D9  D8  D7  D6  D5  D4 D10 D11 D12  D3  A0  A1  A2  A3
+ 
++enum SignalSet : byte {
++  SIGNAL_SET_CSD_BASIC         = 0,  // ČSD basic signal set 
++  SIGNAL_SET_CSD_INTERMEDIATE  = 1,   // ČSD intermediate signal set 
++  SIGNAL_SET_CSD_EMBEDDED      = 2,   // ČSD embedded signal set 
++  SIGNAL_SET_SZDC_BASIC        = 3,   // SŽDC basic signal set 
++  SIGNAL_SET_CSD_MECHANICAL    = 4,   // ČSD mechanical signal set 
++};
++
++enum OutputLight : byte {
++  yellowUpper = 0,
++  green,
++  red,
++  lunarUpper,
++  yellowLower,
++  blue,
++  greenStrip,
++  yellowStrip,
++  lunarLower,
++  back,
++
++  // must be LAST
++  OutpuLightCount
++};
++
++/*
+ const byte SIGNAL_SET_CSD_BASIC         = 0 ;   // ČSD basic signal set 
+ const byte SIGNAL_SET_CSD_INTERMEDIATE  = 1 ;   // ČSD intermediate signal set 
+ const byte SIGNAL_SET_CSD_EMBEDDED      = 2 ;   // ČSD embedded signal set 
+ const byte SIGNAL_SET_SZDC_BASIC        = 3 ;   // SŽDC basic signal set 
+ const byte SIGNAL_SET_CSD_MECHANICAL    = 4 ;   // ČSD mechanical signal set 
+-
++*/
+ const byte LIGHT_OFF          = 0;
+ const byte LIGHT_ON           = 1;
+ const byte LIGHT_BLINKING_54  = 2;
+@@ -119,6 +160,8 @@ const int FADE_COUNTER_LIGHT_2[11] = { -1, 10, 7, 4, 3, 2, 2, 3, 4, 7, 10 };
+ 
+ unsigned long fadeTimeLight[11] = { 6, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66 } ;
+ 
++typedef byte SingleOutputForAllMasts[NUM_SIGNAL_MAST];
++
+ byte signalMastLightYellowUpperOutput[NUM_SIGNAL_MAST] = { ONA, ONA, ONA, ONA, ONA, ONA, ONA, ONA };   // yellow upper
+ byte signalMastLightGreenOutput[NUM_SIGNAL_MAST]       = { ONA, ONA, ONA, ONA, ONA, ONA, ONA, ONA };   // green
+ byte signalMastLightRedOutput[NUM_SIGNAL_MAST]         = { ONA, ONA, ONA, ONA, ONA, ONA, ONA, ONA };   // red
+@@ -130,7 +173,19 @@ byte signalMastLightYellowStripOutput[NUM_SIGNAL_MAST] = { ONA, ONA, ONA, ONA, O
+ byte signalMastLightLunarLowerOutput[NUM_SIGNAL_MAST]  = { ONA, ONA, ONA, ONA, ONA, ONA, ONA, ONA };   // lunar lower
+ byte signalMastLightBackwardOutput[NUM_SIGNAL_MAST]    = { ONA, ONA, ONA, ONA, ONA, ONA, ONA, ONA };   // backward
+ 
+-byte signalMastSignalSet[NUM_SIGNAL_MAST]    = { SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC };   // signal set
++const SingleOutputForAllMasts *outputConfiguration[OutpuLightCount] = {
++  &signalMastLightYellowUpperOutput,
++  &signalMastLightGreenOutput,
++  &signalMastLightGreenOutput,
++  &signalMastLightLunarOutput,
++  NULL,
++  NULL,
++  NULL,
++  NULL,
++  NULL
++};
++
++SignalSet signalMastSignalSet[NUM_SIGNAL_MAST]    = { SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC };   // signal set
+ 
+ byte signalMastNumberAddress[NUM_SIGNAL_MAST]    = { 1, 1, 1, 1, 1, 1, 1, 1 };   // number of address
+ 
+@@ -152,7 +207,6 @@ byte lightState[NUM_OUTPUTS] = { 255, 255, 255, 255, 255, 255, 255, 255, 255, 25
+ byte bublState[NUM_OUTPUTS] = { 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255 };
+ int lightCounter[NUM_OUTPUTS] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+ unsigned long lightStartTimeBubl[NUM_OUTPUTS] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+-unsigned long lightElapsedTimeBubl[NUM_OUTPUTS] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+ 
+ byte signalMastLastCode[NUM_SIGNAL_MAST]    = { 255, 255, 255, 255, 255, 255, 255, 255 };   // last code
+ unsigned long signalMastLastTime[NUM_SIGNAL_MAST]    = { 0, 0, 0, 0, 0, 0, 0, 0 };   // last time
+@@ -251,30 +305,30 @@ void notifyDccAccTurnoutOutput( uint16_t Addr, uint8_t Direction, uint8_t Output
+ /**************************************************************************
+  *
+  */
+-void setFactoryDefault() {
+-
+-  struct CVPair {
+-    uint16_t CV;
+-    uint8_t Value;
++struct CVPair {
++  const uint16_t CV;
++  const uint8_t Value;
++};
++
++const CVPair FactoryDefaultCVs[] = {
++    { CV_ACCESSORY_DECODER_ADDRESS_LSB, INIT_DECODER_ADDRESS },
++    { CV_ACCESSORY_DECODER_ADDRESS_MSB, 0 },
++    { CV_AUXILIARY_ACTIVATION, VALUE_AUXILIARY_ACTIVATION },
++    { CV_DECODER_KEY, VALUE_DECODER_KEY },
++    { CV_DECODER_LOCK, VALUE_DECODER_LOCK },
++
++    { CV_ROCO_ADDRESS, VALUE_ROCO_ADDRESS },
++    { CV_FADE_RATE, VALUE_FADE_RATE },
++    { CV_NUM_SIGNAL_NUMBER, VALUE_NUM_SIGNAL_NUMBER },
++    { CV_ASPECT_LAG, VALUE_ASPECT_LAG },
++    
++    { CV_PROD_ID_1, VALUE_PROD_ID_1 },
++    { CV_PROD_ID_2, VALUE_PROD_ID_2 },
++    { CV_PROD_ID_3, VALUE_PROD_ID_3 },
++    { CV_PROD_ID_4, VALUE_PROD_ID_4 },
+   };
+ 
+-  CVPair FactoryDefaultCVs[] = {
+-      { CV_ACCESSORY_DECODER_ADDRESS_LSB, INIT_DECODER_ADDRESS },
+-      { CV_ACCESSORY_DECODER_ADDRESS_MSB, 0 },
+-      { CV_AUXILIARY_ACTIVATION, VALUE_AUXILIARY_ACTIVATION },
+-      { CV_DECODER_KEY, VALUE_DECODER_KEY },
+-      { CV_DECODER_LOCK, VALUE_DECODER_LOCK },
+-
+-      { CV_ROCO_ADDRESS, VALUE_ROCO_ADDRESS },
+-      { CV_FADE_RATE, VALUE_FADE_RATE },
+-      { CV_NUM_SIGNAL_NUMBER, VALUE_NUM_SIGNAL_NUMBER },
+-      { CV_ASPECT_LAG, VALUE_ASPECT_LAG },
+-      
+-      { CV_PROD_ID_1, VALUE_PROD_ID_1 },
+-      { CV_PROD_ID_2, VALUE_PROD_ID_2 },
+-      { CV_PROD_ID_3, VALUE_PROD_ID_3 },
+-      { CV_PROD_ID_4, VALUE_PROD_ID_4 },
+-    };
++void setFactoryDefault() {
+ 
+   uint8_t FactoryDefaultCVSize = sizeof(FactoryDefaultCVs) / sizeof(CVPair);
+ 
+@@ -284,6 +338,20 @@ void setFactoryDefault() {
+     }
+   }
+ 
++  struct MastConfig {
++    byte  outputs[maxOutputsPerMast];
++    byte  signalSet;
++    byte  numberOfAddresses;
++
++    MastConfig(const byte (&aOutputs)[maxOutputsPerMast], byte aSignalSet, byte aNumberOfAddresses) : signalSet(aSignalSet), numberOfAddresses(aNumberOfAddresses){
++      memcpy(outputs, aOutputs, sizeof(outputs));
++    }
++  };
++
++  MastConfig signalMasts2[] = {
++    MastConfig( { 0,   1,   2,  3, 4, ONA, ONA, ONA, ONA, ONA }, 0, 5),  // signal mast 0
++  };
++
+   uint8_t signalMasts[] = {      
+       ONA,   0,   1, ONA, ONA, ONA, ONA, ONA, ONA, ONA, 0,  0, 1,  // signal mast 0
+       ONA,   2,   3, ONA, ONA, ONA, ONA, ONA, ONA, ONA, 0,  0, 1,  // signal mast 1
+@@ -335,11 +403,7 @@ void initLocalVariables() {
+   rocoAddress = Dcc.getCV(CV_ROCO_ADDRESS);
+ 
+   fadeRate = Dcc.getCV(CV_FADE_RATE);
+-
+-  fadeRate = fadeRate & 0x07;
+-  for (int i = 0; i < 11; i++) {
+-    fadeTimeLight[i] = FADE_TIME_LIGHT[i] * fadeRate;
+-  }
++  initializeFadeTime();
+ 
+   numSignalNumber = Dcc.getCV(CV_NUM_SIGNAL_NUMBER);
+   aspectLag = Dcc.getCV(CV_ASPECT_LAG);
+@@ -349,6 +413,13 @@ void initLocalVariables() {
+ 
+ }
+ 
++void initializeFadeTime() {
++  fadeRate = fadeRate & 0x07;
++  for (int i = 0; i < 11; i++) {
++    fadeTimeLight[i] = FADE_TIME_LIGHT[i] * fadeRate;
++  }
++}
++
+ /**********************************************************************************
+  * Init local variables for signal mast.
+  */
+@@ -391,20 +462,21 @@ void initLocalVariablesSignalMast() {
+     counter++;
+     
+   }
+-
++ 
++  Serial.println("Finish 1");
+ 
+   maxDecoderAddress = thisDecoderAddress ;
+   for (int i = 0; i < numSignalNumber; i++) { 
+     maxDecoderAddress = maxDecoderAddress + signalMastNumberAddress[i] ;
+   }
+ 
++  Serial.println("Finish 2");
+ 
+   int idx = 0 ;
+   for (int i = 0; i < numSignalNumber; i++) {               
+     for (int j = 0; j < signalMastNumberAddress[i]; j++) {  
+       signalMastNumberIdx[idx] = i ;
+       posNumber[idx] = j ;
+-      
+       signalMastChangePos(signalMastNumberIdx[idx], posNumber[idx], 1) ;
+       signalMastChangePos(signalMastNumberIdx[idx], posNumber[idx], 0) ;
+       
+@@ -421,7 +493,17 @@ void initLocalVariablesSignalMast() {
+ 
+     }
+   }
+-  
++}
++
++int currentBulbTimeSpan = -1;
++
++int timeElapsedForBulb(byte nrOutput) {
++  unsigned long span = currentTime - lightStartTimeBubl[nrOutput];
++  if (span >= INT16_MAX) {
++    return currentBulbTimeSpan = INT16_MAX;
++  } else {
++    return currentBulbTimeSpan = (int)span;
++  }
+ }
+ 
+ 
+@@ -430,12 +512,6 @@ void initLocalVariablesSignalMast() {
+  */
+ void processOutputLight(byte nrOutput) {
+ 
+-  lightElapsedTimeBubl[nrOutput] = currentTime - lightStartTimeBubl[nrOutput];
+-
+-  if (lightElapsedTimeBubl[nrOutput] > 0xFFFFFFF0) {
+-    lightElapsedTimeBubl[nrOutput] = 0 ;  
+-  }
+-
+   switch (bublState[nrOutput]) {
+   case BUBL_ON:
+     processBublOn(nrOutput);
+@@ -505,7 +581,6 @@ void signalMastChangePos(int nrSignalMast, uint16_t pos, uint8_t Direction) {
+   signalMastLastCode[nrSignalMast] = newAspectIdx ;
+   signalMastLastTime[nrSignalMast] = currentTime ;
+   signalMastCodeChanged[nrSignalMast] = true ;
+-    
+ }  
+ 
+ /**********************************************************************************
+@@ -2533,7 +2608,7 @@ void changeLightState(byte lightOutput, byte newState) {
+  */
+ void processBublOn(byte nrOutput) {
+ 
+-  if (lightElapsedTimeBubl[nrOutput] > fadeTimeLight[10]) {
++if (timeElapsedForBulb(nrOutput) > fadeTimeLight[10]) {
+     digitalWrite(OUTPUT_PIN[nrOutput], HIGH);
+     lightCounter[nrOutput] = 0;
+     return;
+@@ -2547,7 +2622,7 @@ void processBublOn(byte nrOutput) {
+  */
+ void processBublOff(byte nrOutput) {
+ 
+-  if (lightElapsedTimeBubl[nrOutput] > fadeTimeLight[10]) {
++  if (timeElapsedForBulb(nrOutput) > fadeTimeLight[10]) {
+     digitalWrite(OUTPUT_PIN[nrOutput], LOW);
+     lightCounter[nrOutput] = 0;
+     return;
+@@ -2560,15 +2635,14 @@ void processBublOff(byte nrOutput) {
+  *
+  */
+ void processBublBlinkingOn54(byte nrOutput) {
+-
+-  if (lightElapsedTimeBubl[nrOutput] > fadeTimeLight[10]) {
++  int elapsed = timeElapsedForBulb(nrOutput);
++  if (elapsed > fadeTimeLight[10]) {
+ 
+     digitalWrite(OUTPUT_PIN[nrOutput], HIGH);
+ 
+-    if (lightElapsedTimeBubl[nrOutput] > BLINKING_TIME_54) { // if (elapsedTimeBubl > BLINKING_TIME) {
++    if (elapsed > BLINKING_TIME_54) { // if (elapsedTimeBubl > BLINKING_TIME) {
+       bublState[nrOutput] = BUBL_BLINKING_54_OFF;    // = BUBL_BLINKING_OFF;
+-      lightStartTimeBubl[nrOutput] = millis();
+-      lightCounter[nrOutput] = 0;
++      lightStartTimeBubl[nrOutput] = currentTime;
+     }
+     return;
+   }
+@@ -2580,15 +2654,14 @@ void processBublBlinkingOn54(byte nrOutput) {
+  *
+  */
+ void processBublBlinkingOn108(byte nrOutput) {
+-
+-  if (lightElapsedTimeBubl[nrOutput] > fadeTimeLight[10]) {
++  int elapsed = timeElapsedForBulb(nrOutput);
++  if (elapsed > fadeTimeLight[10]) {
+ 
+     digitalWrite(OUTPUT_PIN[nrOutput], HIGH);
+ 
+-    if (lightElapsedTimeBubl[nrOutput] > BLINKING_TIME_108) { // if (elapsedTimeBubl > BLINKING_TIME) {
++    if (elapsed > BLINKING_TIME_108) { // if (elapsedTimeBubl > BLINKING_TIME) {
+       bublState[nrOutput] = BUBL_BLINKING_108_OFF;    // = BUBL_BLINKING_OFF;
+-      lightStartTimeBubl[nrOutput] = millis();
+-      lightCounter[nrOutput] = 0;
++      lightStartTimeBubl[nrOutput] = currentTime;
+     }
+     return;
+   }
+@@ -2600,15 +2673,14 @@ void processBublBlinkingOn108(byte nrOutput) {
+  *
+  */
+ void processBublBlinkingOn45(byte nrOutput) {
+-
+-  if (lightElapsedTimeBubl[nrOutput] > fadeTimeLight[10]) {
++  int elapsed = timeElapsedForBulb(nrOutput);
++  if (elapsed > fadeTimeLight[10]) {
+ 
+     digitalWrite(OUTPUT_PIN[nrOutput], HIGH);
+ 
+-    if (lightElapsedTimeBubl[nrOutput] > BLINKING_TIME_45) { // if (elapsedTimeBubl > BLINKING_TIME) {
++    if (elapsed > BLINKING_TIME_45) { // if (elapsedTimeBubl > BLINKING_TIME) {
+       bublState[nrOutput] = BUBL_BLINKING_45_OFF;    // = BUBL_BLINKING_OFF;
+-      lightStartTimeBubl[nrOutput] = millis();
+-      lightCounter[nrOutput] = 0;
++      lightStartTimeBubl[nrOutput] = currentTime;
+     }
+     return;
+   }
+@@ -2620,15 +2692,14 @@ void processBublBlinkingOn45(byte nrOutput) {
+  *
+  */
+ void processBublBlinkingOn22(byte nrOutput) {
+-
+-  if (lightElapsedTimeBubl[nrOutput] > fadeTimeLight[10]) {
++  int elapsed = timeElapsedForBulb(nrOutput);
++  if (elapsed > fadeTimeLight[10]) {
+ 
+     digitalWrite(OUTPUT_PIN[nrOutput], HIGH);
+ 
+-    if (lightElapsedTimeBubl[nrOutput] > BLINKING_TIME_22) { // if (elapsedTimeBubl > BLINKING_TIME) {
++    if (elapsed > BLINKING_TIME_22) { // if (elapsedTimeBubl > BLINKING_TIME) {
+       bublState[nrOutput] = BUBL_BLINKING_22_OFF;    // = BUBL_BLINKING_OFF;
+-      lightStartTimeBubl[nrOutput] = millis();
+-      lightCounter[nrOutput] = 0;
++      lightStartTimeBubl[nrOutput] = currentTime;
+     }
+     return;
+   }
+@@ -2640,15 +2711,14 @@ void processBublBlinkingOn22(byte nrOutput) {
+  *
+  */
+ void processBublBlinkingOff54(byte nrOutput) {
+-
+-  if (lightElapsedTimeBubl[nrOutput] > fadeTimeLight[10]) {
++  int elapsed = timeElapsedForBulb(nrOutput);
++  if (elapsed > fadeTimeLight[10]) {
+ 
+     digitalWrite(OUTPUT_PIN[nrOutput], LOW);
+ 
+-    if (lightElapsedTimeBubl[nrOutput] > BLINKING_TIME_54) { // if (elapsedTimeBubl > BLINKING_TIME) {
++    if (elapsed > BLINKING_TIME_54) { // if (elapsedTimeBubl > BLINKING_TIME) {
+       bublState[nrOutput] = BUBL_BLINKING_54_ON;    // = BUBL_BLINKING_ON;
+-      lightStartTimeBubl[nrOutput] = millis();
+-      lightCounter[nrOutput] = 0;      
++      lightStartTimeBubl[nrOutput] = currentTime;
+     }
+     return;
+   }
+@@ -2660,15 +2730,14 @@ void processBublBlinkingOff54(byte nrOutput) {
+  *
+  */
+ void processBublBlinkingOff108(byte nrOutput) {
+-
+-  if (lightElapsedTimeBubl[nrOutput] > fadeTimeLight[10]) {
++  int elapsed = timeElapsedForBulb(nrOutput);
++  if (elapsed > fadeTimeLight[10]) {
+ 
+     digitalWrite(OUTPUT_PIN[nrOutput], LOW);
+ 
+-    if (lightElapsedTimeBubl[nrOutput] > BLINKING_TIME_108) { // if (elapsedTimeBubl > BLINKING_TIME) {
++    if (elapsed > BLINKING_TIME_108) { // if (elapsedTimeBubl > BLINKING_TIME) {
+       bublState[nrOutput] = BUBL_BLINKING_108_ON;    // = BUBL_BLINKING_ON;
+-      lightStartTimeBubl[nrOutput] = millis();
+-      lightCounter[nrOutput] = 0;
++      lightStartTimeBubl[nrOutput] = currentTime;
+     }
+     return;
+   }
+@@ -2680,15 +2749,14 @@ void processBublBlinkingOff108(byte nrOutput) {
+  *
+  */
+ void processBublBlinkingOff45(byte nrOutput) {
+-
+-  if (lightElapsedTimeBubl[nrOutput] > fadeTimeLight[10]) {
++  int elapsed = timeElapsedForBulb(nrOutput);
++  if (timeElapsedForBulb(nrOutput) > fadeTimeLight[10]) {
+ 
+     digitalWrite(OUTPUT_PIN[nrOutput], LOW);
+ 
+-    if (lightElapsedTimeBubl[nrOutput] > BLINKING_TIME_45) { // if (elapsedTimeBubl > BLINKING_TIME) {
++    if (elapsed > BLINKING_TIME_45) { // if (elapsedTimeBubl > BLINKING_TIME) {
+       bublState[nrOutput] = BUBL_BLINKING_45_ON;    // = BUBL_BLINKING_ON;
+-      lightStartTimeBubl[nrOutput] = millis();
+-      lightCounter[nrOutput] = 0;
++      lightStartTimeBubl[nrOutput] = currentTime;
+     }
+     return;
+   }
+@@ -2700,15 +2768,14 @@ void processBublBlinkingOff45(byte nrOutput) {
+  *
+  */
+ void processBublBlinkingOff22(byte nrOutput) {
+-
+-  if (lightElapsedTimeBubl[nrOutput] > fadeTimeLight[10]) {
++  int elapsed = timeElapsedForBulb(nrOutput);
++  if (elapsed > fadeTimeLight[10]) {
+ 
+     digitalWrite(OUTPUT_PIN[nrOutput], LOW);
+ 
+-    if (lightElapsedTimeBubl[nrOutput] > BLINKING_TIME_22) { // if (elapsedTimeBubl > BLINKING_TIME) {
++    if (elapsed > BLINKING_TIME_22) { // if (elapsedTimeBubl > BLINKING_TIME) {
+       bublState[nrOutput] = BUBL_BLINKING_22_ON;    // = BUBL_BLINKING_ON;
+-      lightStartTimeBubl[nrOutput] = millis();
+-      lightCounter[nrOutput] = 0;
++      lightStartTimeBubl[nrOutput] = currentTime;
+     }
+     return;
+   }
+@@ -2720,6 +2787,12 @@ void processBublBlinkingOff22(byte nrOutput) {
+  *
+  */
+ void processFadeOn(byte nrOutput) {
++ /*
++  Serial.print("Fade ON, idx="); Serial.print(idx); Serial.print(", counters: "); 
++  Serial.print(FADE_COUNTER_LIGHT_1[idx]); Serial.print("/"); Serial.print(FADE_COUNTER_LIGHT_2[idx]); 
++  Serial.print(", time="); Serial.print(elapsed);
++  Serial.print(" pwm="); Serial.println(pwm);
++*/
+ 
+   if (lightElapsedTimeBubl[nrOutput] > fadeTimeLight[10]) {
+     if (lightCounter[nrOutput] <= FADE_COUNTER_LIGHT_1[11]) {
+@@ -2848,7 +2921,19 @@ void processFadeOn(byte nrOutput) {
+  *
+  */
+ void processFadeOff(byte nrOutput) {
++  int idx;
++  int limit = (sizeof(fadeTimeLight) / sizeof(fadeTimeLight[0]));
++  int elapsed = timeElapsedForBulb(nrOutput);
++  for (idx = 0; idx < limit && elapsed > fadeTimeLight[idx]; idx++) ;
++  
++  int span = (maxBrightness - minBrightness);
++  int pwm = idx >= limit ? minBrightness : maxBrightness - ((span * FADE_COUNTER_LIGHT_1[idx]) / FADE_COUNTER_LIGHT_2[idx]);
+ 
++
++//  Serial.print("Fade OFF, idx="); Serial.print(idx); Serial.print(", counters: "); 
++//  Serial.print(FADE_COUNTER_LIGHT_1[idx]); Serial.print("/"); Serial.print(FADE_COUNTER_LIGHT_2[idx]); 
++//  Serial.print(", time="); Serial.print(lightElapsedTimeBubl[nrOutput]);
++//  Serial.print(" pwm="); Serial.println(pwm);
+   if (lightElapsedTimeBubl[nrOutput] > fadeTimeLight[10]) {
+     if (lightCounter[nrOutput] <= FADE_COUNTER_LIGHT_1[11]) {
+       digitalWrite(OUTPUT_PIN[nrOutput], LOW);
+@@ -3043,10 +3128,7 @@ void notifyCVChange(uint16_t CV, uint8_t Value) {
+ 
+   if (CV == CV_FADE_RATE) {
+     fadeRate = Value;
+-    fadeRate = fadeRate & 0x07;
+-    for (int i = 0; i < 11; i++) {
+-      fadeTimeLight[i] = FADE_TIME_LIGHT[i] * fadeRate;
+-    }
++    initializeFadeTime();
+     return ;
+   }
+ 
