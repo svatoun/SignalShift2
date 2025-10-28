@@ -18,6 +18,9 @@
 #include <EEPROM.h>
 
 #include "Common.h"
+#include "SignalShift.h"
+#include "Terminal.h"
+#include "DecoderEnv.h"
 
 #define Shift
 
@@ -28,30 +31,6 @@ const boolean debugLights = false;
 const boolean debugAspects = false;
 
 const uint8_t SW_VERSION = 12;
-
-/**
- * Maximum possible outputs (lights) for a single mast. The value here affects the CV layout: for each Mast,
- * a consecutive CV list specifies physical outputs of individual Mast lights. Changing the value here will
- * damage existing decoder configurations as the CVs will be shifted.
- */
-const int maxOutputsPerMast = 10;
-
-/**
- * Maximum aspects supported per one signal table.
- */
-const int maxAspects = 32;
-
-/**
- * Maximum number of outputs. This value does not affect the CV layout, but is used as a dimension of status arrays.
- */
-const int NUM_OUTPUTS = 80;
-
-/**
- * Maximum number of signal masts supported by a single decoder.
- */
-const int NUM_SIGNAL_MAST = 16;
-
-const int SEGMENT_SIZE = maxOutputsPerMast + 3;
 
 // --------- HARDWARE PIN WIRING / SETUP --------------------
 const byte ACK_BUSY_PIN = A0;
@@ -76,55 +55,6 @@ const bool ShiftPWM_invertOutputs = true;
 #include <ShiftPWM.h>
 #endif
 
-/* ------------ Supported CV numbers ------------------ */
-const uint16_t CV_AUXILIARY_ACTIVATION = 2;
-const uint16_t CV_DECODER_KEY = 15;
-const uint16_t CV_DECODER_LOCK = 16;
-const uint16_t CV_RESET_TYPE = 33;
-const uint16_t CV_ROCO_ADDRESS = 34;
-const uint16_t CV_FADE_RATE = 39;
-const uint16_t CV_NUM_SIGNAL_NUMBER = 40;
-const uint16_t CV_ASPECT_LAG = 41;
-
-const uint16_t CV_PROD_ID_1 = 47;
-const uint16_t CV_PROD_ID_2 = 48;
-const uint16_t CV_PROD_ID_3 = 49;
-const uint16_t CV_PROD_ID_4 = 50;
-
-const uint16_t START_CV_OUTPUT = 128;
-const uint16_t END_CV_OUTPUT = START_CV_OUTPUT + (SEGMENT_SIZE * NUM_SIGNAL_MAST - 1);
-
-const uint16_t START_CV_OUTPUT_BASE = 352;
-const uint16_t END_CV_OUTPUT_BASE = START_CV_OUTPUT_BASE + NUM_SIGNAL_MAST - 1;
-
-const uint16_t START_CV_ASPECT_TABLE = 512;
-static_assert(END_CV_OUTPUT < START_CV_ASPECT_TABLE, "Too many outputs per masts, CV overlap");
-static_assert(START_CV_ASPECT_TABLE + NUM_SIGNAL_MAST * maxAspects <= 1024, "Too many mast aspects, out of memory");
-
-/* ------------- Default values for supported CVs ---------- */
-
-const uint8_t VALUE_AUXILIARY_ACTIVATION = 4;  // change this value to restore CV defaults after upload sketch
-const uint8_t VALUE_DECODER_KEY = 0;           // unlocked decoder
-const uint8_t VALUE_DECODER_LOCK = 0;          // unlocked decoder
-
-const uint8_t VALUE_ROCO_ADDRESS = 0;       // 1 - ROCO address, 0 - LENZ address
-const uint8_t VALUE_FADE_RATE = 5;          // 0 - 7
-const uint8_t VALUE_NUM_SIGNAL_NUMBER = 8;  // 1 - NUM_SIGNAL_MAST
-const uint8_t VALUE_ASPECT_LAG = 1;         // 0 - 255   LAG × 0,128 s
-
-const uint8_t VALUE_PROD_ID_1 = 2;  // productID #1
-const uint8_t VALUE_PROD_ID_2 = 1;  // productID #2
-const uint8_t VALUE_PROD_ID_3 = 1;  // productID #3
-const uint8_t VALUE_PROD_ID_4 = 1;  // productID #4
-
-const int NUM_8BIT_SHIFT_REGISTERS = (NUM_OUTPUTS + 7) / 8;
-
-const int maxAspectBits = 5;
-static_assert(maxAspects <= (1 << maxAspectBits), "Too many aspects, do not fit in 5 bits");
-
-const byte ONA = 0;  // OUTPUT_NOT_ASSIGNED
-
-const uint8_t INIT_DECODER_ADDRESS = 100;  // ACCESSORY DECODER ADDRESS default
 uint16_t thisDecoderAddress = 100;         // ACCESSORY DECODER ADDRESS
 uint16_t maxDecoderAddress = 0;
 
@@ -132,110 +62,6 @@ uint16_t maxDecoderAddress = 0;
 //   offset                  0   1   2   3   4   5   6   7   8   9  10  11  12  13  14  15
 //const byte OUTPUT_PIN[] = { 19, 18,  9,  8,  7,  6,  5,  4, 10, 11, 12,  3, 14, 15, 16, 17 };
 //   pins                   A5  A4  D9  D8  D7  D6  D5  D4 D10 D11 D12  D3  A0  A1  A2  A3
-
-// Signal sets defined in the decoder
-enum SignalSet : byte {
-  DisabledSignalSet = 0,
-  SIGNAL_SET_CSD_BASIC = 1,         // ČSD basic signal set
-  SIGNAL_SET_CSD_INTERMEDIATE = 2,  // ČSD intermediate signal set
-  SIGNAL_SET_CSD_EMBEDDED = 3,      // ČSD embedded signal set
-  SIGNAL_SET_SZDC_BASIC = 4,        // SŽDC basic signal set
-  SIGNAL_SET_CSD_MECHANICAL = 5,    // ČSD mechanical signal set
-
-  _signal_set_last  // must be last
-};
-
-const byte maxSignalSets = 16;
-const byte maxMastTypes = 32;
-
-enum SignalSetFlags : byte {
-  // signal controlled by a binary number encoded into turnout states
-  bitwiseControl = 0x00,
-  // each address represents one signal
-  turnoutNoDirection = 0x20,
-  // signal controlled by an extended packet
-  extendedPacket = 0x40,
-  // signal controlled as a series of turnouts
-  turnoutControl = 0x60,
-  // if set, the signal is rather driven by a codetable (which maps to aspects),
-  // rather than the aspect table itself.
-  usesCodes  = 0x80,
-
-  signalSetFlags = 0xe0,
-  signalSetType = (byte)~signalSetFlags,
-  signalSetControlType = (signalSetFlags - usesCodes)
-};
-static_assert(_signal_set_last <= ((~signalSetFlags) & 0xff), "Too many signal sets");
-
-inline byte toSignalSetIndex(byte b) { 
-  byte x = b & signalSetType;
-  return x >= maxSignalSets ? 0 : x;
-}
-
-extern const byte mastTypeDefinitionCount;
-
-inline byte toTemplateIndex(byte b) { 
-  byte x = b & (~signalSetFlags);
-  return x >= mastTypeDefinitionCount ? 0 : x;
-}
-
-// Signs on an individual light. Fixed (on, off) and blinking.
-enum LightSign {
-  inactive = 0x00,  // since initialized globals are zeroed after initializer till end of object
-  fixed = 0x01,
-  blinking54,
-  blinking108,
-  blinking45,
-  blinking22,
-
-  _lightsign_last  // must be last
-};
-
-#define LON (fixed)
-#define LOFF (fixed | 0x10)
-#define L(n) (n)
-// originally, blinking had a bit flag, but that's not necessary
-#define B(n) (n)
-
-
-/**
- * Describes the state of a light output. Defined as a structure for
- * easier access; the alternative would be a bit manipulation.
- */
-struct LightFunction {
-  /**
-   * The sign signalled by the light. This field 
-   */
-  LightSign sign : 4;
-  static_assert(_lightsign_last <= 16, "Too many signs, must fit in 4 bits (LightFunction::sign)");
-
-  /**
-   * True to change the light towards OFF, false to change towards ON.
-   */
-  boolean off : 1;
-
-  /**
-   * If true, the light reached the on/off terminal state
-   */
-  boolean end : 1;
-
-  // Default initializer: output off(=true), final brightness (end=true), not alternating
-  LightFunction()
-    : sign(inactive), off(true), end(true) {}
-
-  // Normal construction
-  LightFunction(LightSign sign, boolean initOff)
-    : sign(sign), off(initOff), end(false) {}
-
-  LightFunction(byte data) {
-    *((byte*)(void*)this) = data;
-  }
-
-  // Copy constructor for easy assignment; make fast assingment of the whole byte.
-  LightFunction(const LightFunction& f) {
-    *((byte*)(void*)this) = *((byte*)(void*)&f);
-  }
-};
 
 const unsigned long BLINKING_TIME_54 = 556;
 const unsigned long BLINKING_TIME_108 = 278;
@@ -250,37 +76,6 @@ const int FADE_COUNTER_LIGHT_2[11] = { /* -1 */ 1, 10, 7, 4, 3, 2, 2, 3, 4, 7, 1
 
 // Will be initialized at startup, and whenever fadeRate global changes. As fadeRate is max 7, the value nicely fits in 9 bits unsigned.
 unsigned int fadeTimeLight[11] = {};
-
-/**
- * Defines a mast prototype. Each mast uses
- * - a signal set
- * - recognizes a defined number of codes
- * - translates a code into an aspect from the signal set
- */
-struct MastTypeDefinition {
-  // number of different codes. Implies number of addresses used.
-  byte codeCount;
-  // default light count
-  byte lightCount;
-  SignalSet signalSet;
-  byte defaultCode;
-
-  byte outputs[maxOutputsPerMast];
-  byte code2Aspect[maxAspects];
-};
-
-enum MastType {
-  none = 0,
-  incoming5,
-  departure4,
-  departure3,
-  shutning2,
-};
-
-struct MastTypeNameId {
-  byte id;
-  const char* name;
-};
 
 SignalSet signalMastSignalSet[NUM_SIGNAL_MAST] = { SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC };  // signal set
 
@@ -317,6 +112,13 @@ uint8_t decoderLock;
 uint8_t rocoAddress;
 uint8_t numSignalNumber;
 uint8_t fadeRate;
+
+#ifdef DEBUG_UART0
+HardwareSerial& console = Serial1;
+#else
+HardwareSerial& console = Serial;
+#endif
+
 
 /**********************************************************************************
  * Setup Arduino.
@@ -427,7 +229,6 @@ void notifyDccAccTurnoutOutput(uint16_t Addr, uint8_t Direction, uint8_t OutputP
     return;
   }
 
-  uint16_t idx = Addr - thisDecoderAddress;
   int pos;
   int signalIndex = findSignalIndex(Addr - thisDecoderAddress, pos);
   // Serial.print(F("Turnout: ")); Serial.print(Addr); Serial.print(F(" = mast: ")); Serial.print(signalIndex); Serial.print(F(" pos: ")); Serial.print(pos); Serial.print(F(" dir: ")); Serial.println(Direction);
@@ -465,39 +266,6 @@ const CVPair FactoryDefaultCVs[] = {
   { CV_PROD_ID_4, VALUE_PROD_ID_4 },
 };
 
-/**
- * Structure that corresponds to a CV block and defines one mast.
- */
-struct MastSettings {
-  /**
-   * Assignments of mast lights to output indexes. It is 1-based, 0 means that the light
-   * has no output (i.e. green light on a mast that cannot signal full speed).
-   */
-  byte outputs[maxOutputsPerMast];
-  /**
-   * If the usesCodes bit is set, the lower 5 bits is the index to the mastTypeDefinitions table (see Definitions).
-   * The table defines the signal set, number of codes -> number of addresses, initial light assignment.
-   * 
-   * If usesCodes is not set, the lower 5 bits is one of the SignalSet constants.
-   * 
-   * Bits 5-7 define how the mast is controlled, see SignalSetFlags
-   */
-  byte signalSetOrMastType;
-
-  /**
-   * The default code (usesCodes) or aspect (!usesCodes)
-   */
-  byte defaultCodeOrAspect;
-
-  /**
-   * The number of assigned addresses. 0 is used in configuration data to compute the actual number of addresses
-   * from the mast type and control style.
-   */
-  byte addresses;
-};
-
-static_assert(SEGMENT_SIZE == sizeof(MastSettings), "MastSettings != SEGMEN_SIZE");
-
 const MastSettings factorySignalMastOutputs[] PROGMEM = {
   { { 1, 2, 3, 4, 5 }, 1 + (usesCodes | turnoutControl), 0, 0 },    // signal mast 0
   { { 0, 6, 7, 8, 9 },     (usesCodes | turnoutControl), 0, 0 },    // signal mast 1
@@ -523,15 +291,15 @@ void setFactoryDefault() {
   int cvNumber = START_CV_OUTPUT;
   int pgmIndex = (int)(void*)factorySignalMastOutputs;
   Serial.println(F("Copying factorySignalMastOutputs"));
-  for (int i = 0; i < sizeof(factorySignalMastOutputs); i++, cvNumber++) {
+  for (unsigned int i = 0; i < sizeof(factorySignalMastOutputs); i++, cvNumber++) {
     Serial.print(F("CV ")); Serial.print(cvNumber); Serial.print(F(":=")); Serial.println(pgm_read_byte_near(pgmIndex + i));
     Dcc.setCV(cvNumber, pgm_read_byte_near(pgmIndex + i));
   }
 
   Serial.println(F("Clearing rest of signal CVs"));
 
-  for (int i = sizeof(factorySignalMastOutputs) / SEGMENT_SIZE; i < NUM_SIGNAL_MAST; i++) {
-    for (int j = 0; j < sizeof(noSignalMastOutputs); j++, cvNumber++) {
+  for (unsigned int i = sizeof(factorySignalMastOutputs) / SEGMENT_SIZE; i < NUM_SIGNAL_MAST; i++) {
+    for (unsigned int j = 0; j < sizeof(noSignalMastOutputs); j++, cvNumber++) {
       Dcc.setCV(cvNumber, pgm_read_byte_near(noSignalMastOutputs + j));
     }
   }
@@ -549,10 +317,9 @@ void setFactoryDefault() {
   // define CVs based on the predefined templates:
   // Serial.print(F("pgmIndex base ")); Serial.println((int)factorySignalMastOutputs, HEX);
   // Serial.print(F(" count ")); Serial.println(sizeof(factorySignalMastOutputs) / sizeof(factorySignalMastOutputs[0]));
-  for (int mast = 0; mast < sizeof(factorySignalMastOutputs) / sizeof(factorySignalMastOutputs[0]); mast++) {
+  for (unsigned int mast = 0; mast < sizeof(factorySignalMastOutputs) / sizeof(factorySignalMastOutputs[0]); mast++) {
     const MastSettings& settingsDef = factorySignalMastOutputs[mast];
-    int cvBase = (sizeof(MastSettings) * mast) + START_CV_OUTPUT;
-
+    
     // Serial.print(F("pgmIndex for mast ")); Serial.print(mast); Serial.print(F(" = ")); Serial.println((int)(&settingsDef), HEX);
     // Serial.print(F("cvBase for mast ")); Serial.print(mast); Serial.print(F(" = ")); Serial.println(cvBase);
     int pgmIndex = (int)(&settingsDef.signalSetOrMastType);
@@ -565,6 +332,8 @@ void setFactoryDefault() {
   initLocalVariables();
 }
 
+const struct MastTypeDefinition& copySignalMastTypeDefinition(byte typeId);
+
 void doChangeMastType(int mast, int signalSetOrMastType, boolean stable) {
   Serial.print(F("Using template for mast ")); Serial.println(mast);
 
@@ -572,7 +341,7 @@ void doChangeMastType(int mast, int signalSetOrMastType, boolean stable) {
   int cvBase = (sizeof(MastSettings) * mast) + START_CV_OUTPUT;
   const struct MastTypeDefinition& def = copySignalMastTypeDefinition(toTemplateIndex(signalSetOrMastType));
   int codeCount = def.codeCount;
-  int lightCount = def.lightCount;
+  //int lightCount = def.lightCount;
 
   printByteBuffer((byte*)&def, sizeof(def)); Serial.println();
   saveTemplateOutputsToCVs(def, mast, stable);
@@ -587,7 +356,7 @@ void doChangeMastType(int mast, int signalSetOrMastType, boolean stable) {
   Dcc.setCV(cv, val);
 
   cv = START_CV_ASPECT_TABLE + mast * maxAspects;
-  for (int i = 0; i < sizeof(def.code2Aspect); i++) {
+  for (unsigned int i = 0; i < sizeof(def.code2Aspect); i++) {
     Dcc.setCV(cv, def.code2Aspect[i]);
     cv++;
   }
@@ -596,7 +365,7 @@ void doChangeMastType(int mast, int signalSetOrMastType, boolean stable) {
 void changeMastType(int mastIndex, int newType) {
   if (newType == 0) {
     int cv = START_CV_OUTPUT + (mastIndex * SEGMENT_SIZE);
-    for (int i = 0; i < maxOutputsPerMast; i++) {
+    for (unsigned int i = 0; i < maxOutputsPerMast; i++) {
       Dcc.setCV(cv + i, 0);
     }
     // number of addresses.
@@ -738,7 +507,7 @@ void saveTemplateAspectsToCVs(int mast, int signalSetOrMastType) {
   printByteBuffer((byte*)&def.code2Aspect, sizeof(def.code2Aspect)); Serial.println();
 
   int cv = START_CV_ASPECT_TABLE + mast * maxAspects;
-  for (int i = 0; i < sizeof(def.code2Aspect); i++) {
+  for (unsigned int i = 0; i < sizeof(def.code2Aspect); i++) {
     Dcc.setCV(cv, def.code2Aspect[i]);
     cv++;
   }
@@ -747,7 +516,7 @@ void saveTemplateAspectsToCVs(int mast, int signalSetOrMastType) {
 void saveTemplateOutputsToCVs(const struct MastTypeDefinition& def, int mastIndex, boolean stable) {
   Serial.print(F("Setting outputs to mast #")); Serial.print(mastIndex); Serial.print(F(" from def ")); Serial.println((int)(int*)(&def), HEX);
   int minLightNumber = findMinLightIndex(mastIndex);
-  int oldLightCount = findLightCount(mastIndex);
+  //int oldLightCount = findLightCount(mastIndex);
   int from = findNextLight(mastIndex);
 
   if (stable && (minLightNumber >= 0)) {
@@ -759,7 +528,7 @@ void saveTemplateOutputsToCVs(const struct MastTypeDefinition& def, int mastInde
 void saveTemplateOutputsToCVs(const struct MastTypeDefinition& def, int mastIndex, int from) {
   int lc = 0;
   int cvIndex = (sizeof(MastSettings) * mastIndex) + START_CV_OUTPUT;
-  for (int i = 0; i < sizeof(def.outputs); i++) {
+  for (unsigned int i = 0; i < sizeof(def.outputs); i++) {
     byte n = def.outputs[i];
     if (n != ONA && n != 0 && n <= NUM_OUTPUTS) {
       n += from;
@@ -814,7 +583,7 @@ int reassignMastOutputs2(int mastIndex, int from) {
 
   Serial.print(F("Reassigning outputs for ")); Serial.print(mastIndex); Serial.print(F(" start from ")); Serial.println(from);
 
-  for (int i = 0; i < sizeof(MastSettings::outputs); i++) {
+  for (unsigned int i = 0; i < sizeof(MastSettings::outputs); i++) {
     byte n = Dcc.getCV(cvIndex);
     if (n > 0 && n != ONA && n <= NUM_OUTPUTS) {
       n = (n - minLightNumber) + from;
@@ -995,6 +764,9 @@ void processOutputLight(byte nrOutput) {
     case blinking22:
       processBulbBlinking(nrOutput, BLINKING_TIME_22);
       break;
+    case inactive:
+    case _lightsign_last:
+      break;
   }
 }
 
@@ -1058,12 +830,12 @@ void setPWM(byte nrOutput, byte level) {
 #endif
 }
 
-void processBulbBlinking(byte nrOutput, int blinkDelay) {
+void processBulbBlinking(int nrOutput, unsigned int blinkDelay) {
   if (nrOutput >= NUM_OUTPUTS) {
     return;
   }
   boolean off = bublState2[nrOutput].off;
-  int elapsed = timeElapsedForBulb(nrOutput);
+  unsigned int elapsed = timeElapsedForBulb(nrOutput);
   if (elapsed > 0xff00) {
     // just to be sure, elapsed time is too large, ignore the light.
     return;
@@ -1186,6 +958,12 @@ void processAspectCode(int nrSignalMast) {
   signalMastCodeChanged[nrSignalMast] = false;
 }
 
+void signalMastChangeAspectCsdBasic(int nrSignalMast, byte newAspect);
+void signalMastChangeAspectCsdMechanical(int nrSignalMast, byte newAspect);
+void signalMastChangeAspectCsdIntermediate(int nrSignalMast, byte newAspect);
+void signalMastChangeAspectCsdEmbedded(int nrSignalMast, byte newAspect);
+void signalMastChangeAspectSzdcBasic(int nrSignalMast, byte newAspect);
+
 /**********************************************************************************
  *
  */
@@ -1219,6 +997,9 @@ void signalMastChangeAspect(int nrSignalMast, byte newAspect) {
     case SIGNAL_SET_CSD_MECHANICAL:
       signalMastChangeAspectCsdMechanical(nrSignalMast, newAspect);
       break;
+    case DisabledSignalSet:
+    case _signal_set_last:
+      break;
   }
 }
 
@@ -1249,7 +1030,7 @@ void signalMastChangeAspect(int progMemOffset, int tableSize, int nrSignalMast, 
 
   // Must copy bytes from PROGMEM to bufferon stack:
   byte* out = (byte*)(void*)&(buffer[0]);
-  for (int i = 0; i < sizeof(buffer); i++) {
+  for (unsigned int i = 0; i < sizeof(buffer); i++) {
     *out = pgm_read_byte_near(progMemOffset + i);
     out++;
   }
@@ -1278,7 +1059,7 @@ void resetStartTime(int lightOutput) {
  */
 void processFadeOnOrOff(byte nrOutput, boolean fadeOn) {
   int idx;
-  int elapsed = timeElapsedForBulb(nrOutput);
+  unsigned int elapsed = timeElapsedForBulb(nrOutput);
 
   int limit = (sizeof(fadeTimeLight) / sizeof(fadeTimeLight[0]));
 
@@ -1331,10 +1112,10 @@ void processFadeOnOrOff(byte nrOutput, boolean fadeOn) {
 void processFadeOn(byte nrOutput) {
   processFadeOnOrOff(nrOutput, true);
   return;
-  int idx = 0;
-  int limit = (sizeof(fadeTimeLight) / sizeof(fadeTimeLight[0]));
+  unsigned int idx = 0;
+  unsigned int limit = (sizeof(fadeTimeLight) / sizeof(fadeTimeLight[0]));
 
-  int elapsed = timeElapsedForBulb(nrOutput);
+  unsigned int elapsed = timeElapsedForBulb(nrOutput);
   for (idx = 0; idx < limit && elapsed > fadeTimeLight[idx]; idx++)
     ;
   int span = (maxBrightness - minBrightness);
@@ -1366,7 +1147,7 @@ void processFadeOff(byte nrOutput) {
   return;
   int idx;
   int limit = (sizeof(fadeTimeLight) / sizeof(fadeTimeLight[0]));
-  int elapsed = timeElapsedForBulb(nrOutput);
+  unsigned int elapsed = timeElapsedForBulb(nrOutput);
   for (idx = 0; idx < limit && elapsed > fadeTimeLight[idx]; idx++)
     ;
 
@@ -1569,7 +1350,7 @@ const struct MastTypeDefinition& copySignalMastTypeDefinition(byte typeId) {
   static MastTypeDefinition buffer;
   int progMemOffset = (int)(void*)(mastTypeDefinitions + typeId);
   byte* out = (byte*)(void*)&(buffer);
-  for (int i = 0; i < sizeof(buffer); i++) {
+  for (unsigned int i = 0; i < sizeof(buffer); i++) {
     *out = pgm_read_byte_near(progMemOffset + i);
     out++;
   }
@@ -1590,6 +1371,6 @@ byte findMastTypeSignalSet(byte typeId) {
   return signalSet;
 }
 
-uint8_t notifyCVRead(unsigned int cv) {
+uint8_t notifyCVRead(uint16_t cv) {
   return EEPROM.read(cv);
 }

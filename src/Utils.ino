@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <EEPROM.h>
 #include "Defs.h"
 #include "Common.h"
@@ -55,6 +56,7 @@ boolean ModuleChain::invokeAll(ModuleCmd cmd) {
 int eepromWriteByte(int addr, byte t, int& checksum) {
   checksum = checksum ^ t;
   EEPROM.update(addr++, (t & 0xff));
+  return checksum;
 }
 
 int eepromWriteInt(int addr, int t, int& checksum) {

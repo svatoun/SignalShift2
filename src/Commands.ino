@@ -1,5 +1,10 @@
 #include <NmraDcc.h>
+#include <ShiftPWM.h>
+
 #include "Common.h"
+#include "SignalShift.h"
+#include "Terminal.h"
+#include "DecoderEnv.h"
 
 boolean handleSignals(ModuleCmd cmd);
 ModuleChain signals("signals", 0, &handleSignals);
@@ -204,7 +209,7 @@ void printMastOutputs(int nMast, boolean suppressFull) {
   int skipCnt = 0;
   int cnt2 =  0;
   boolean outPrinted = false;
-  for (int x = 0; x < maxOutputsPerMast; x++) {
+  for (unsigned int x = 0; x < maxOutputsPerMast; x++) {
     int a = lights[x];
     if (a == ONA || a > NUM_OUTPUTS) {
       if (skipCnt++ == 0) {
@@ -225,7 +230,7 @@ void printMastOutputs(int nMast, boolean suppressFull) {
       Serial.print(':');
     }
     skipCnt = 0;
-    int seq = x + 1;
+    unsigned int seq = x + 1;
     while ((seq < sizeof(lights)) && (lights[seq] == (1 + lights[seq - 1]))) {
       seq++;
     }
@@ -889,6 +894,7 @@ void commandDccTurnout() {
 boolean handleSignals(ModuleCmd cmd) {
   switch (cmd) {
     case initialize:
+      registerLineCommand("CLR", &commandClear);
       registerLineCommand("SGN", &commandSetSignal);
       registerLineCommand("SET", &commandSetCV);
       registerLineCommand("GET", &commandGetCV);
@@ -903,5 +909,8 @@ boolean handleSignals(ModuleCmd cmd) {
       registerLineCommand("ADR", &commandAddress);
       registerLineCommand("TNT", &commandDccTurnout);
       break;
+    default:
+      break;
   }
+  return true;
 }

@@ -1,6 +1,8 @@
 #ifndef __common_h__
 #define __common_h__
 
+extern HardwareSerial& Console;
+
 struct LineCommand {
   const char* cmd;
   void (*handler)();
@@ -24,8 +26,8 @@ enum ModuleCmd {
 struct ModuleChain {
   static ModuleChain* head;
   
-  byte priority;
   ModuleChain *next;
+  byte priority;
   boolean (*handler)(ModuleCmd);
 
   ModuleChain(const char* n, byte priority, boolean (*h)(ModuleCmd));
@@ -53,5 +55,7 @@ __attribute__((noinline)) char *printNumber(char *out, int no, int base) {
 extern char *inputPos;
 extern char *inputEnd;
 
+void initTerminal();
+void setupTerminal();
 
 #endif

@@ -1,4 +1,4 @@
-
+#include <Arduino.h>
 #include <EEPROM.h>
 #include "Common.h"
 
@@ -20,7 +20,6 @@ LineCommand lineCommands[maxLineCommands];
 
 void initTerminal() {
   registerLineCommand("RST", &commandReset);
-  registerLineCommand("CLR", &commandClear);
 }
 
 void clearInputLine() {
@@ -193,7 +192,6 @@ int nextNumber(boolean extDelims) {
     }
     *p = 0;
   }
-  char* ne;
   int val = atoi(inputPos);
   inputPos = p + 1;
   return val;

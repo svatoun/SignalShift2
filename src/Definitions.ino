@@ -1,3 +1,7 @@
+#include <Arduino.h>
+
+#include "SignalShift.h"
+
 typedef LightFunction AspectDefinition[maxOutputsPerMast];
 typedef byte AspectDefinitionBytes[maxOutputsPerMast];
 typedef AspectDefinitionBytes SignalSet32[32];
