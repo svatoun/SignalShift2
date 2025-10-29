@@ -64,7 +64,7 @@ int eepromWriteInt(int addr, int t, int& checksum) {
   EEPROM.update(addr++, (t & 0xff));
   EEPROM.update(addr++, (t >> 8) & 0xff);
   if (debugControl) {
-    Serial.print(t & 0xff, HEX); Serial.print((t >> 8) & 0xff, HEX); Serial.print(' ');
+    Console.print(t & 0xff, HEX); Console.print((t >> 8) & 0xff, HEX); Console.print(' ');
   }
   return addr;
 }
@@ -82,11 +82,11 @@ int readEepromInt(int &addr, int& checksum, boolean& allzero) {
   int v = EEPROM.read(addr) + (EEPROM.read(addr + 1) << 8);
   addr += 2;
   checksum = checksum ^ v;
-  //  Serial.print(v & 0xff, HEX); Serial.print("-"); Serial.print((v >> 8) & 0xff, HEX); Serial.print(" ");
+  //  Console.print(v & 0xff, HEX); Console.print("-"); Console.print((v >> 8) & 0xff, HEX); Console.print(" ");
   if (v != 0) {
     allzero = false;
   }
-  //  Serial.print(F(" = ")); Serial.println(v);
+  //  Console.print(F(" = ")); Console.println(v);
   return v;
 }
 
@@ -96,20 +96,20 @@ int readEepromInt(int &addr, int& checksum, boolean& allzero) {
 const boolean debugEEPROM = false;
 void eeBlockWrite(byte magic, int eeaddr, const void* address, int size) {
   if (debugControl) {
-    Serial.print(F("Writing EEPROM ")); Serial.print(eeaddr, HEX); Serial.print('-'); Serial.print(eeaddr + size - 1, HEX); Serial.print(F(":")); Serial.print(size);  Serial.print(F(", source: ")); Serial.println((int)address, HEX);
+    Console.print(F("Writing EEPROM ")); Console.print(eeaddr, HEX); Console.print('-'); Console.print(eeaddr + size - 1, HEX); Console.print(F(":")); Console.print(size);  Console.print(F(", source: ")); Console.println((int)address, HEX);
   }
   const byte *ptr = (const byte*) address;
   byte hash = magic;
   EEPROM.write(eeaddr, magic);
   if (debugControl) {
-    Serial.print(F("magic:")); Serial.println(magic, HEX);
+    Console.print(F("magic:")); Console.println(magic, HEX);
   }
   eeaddr++;
   for (; size > 0; size--) {
     byte b = *ptr;
     EEPROM.write(eeaddr, b);
     if (debugEEPROM) {
-      Serial.print(b, HEX);
+      Console.print(b, HEX);
     }
     ptr++;
     eeaddr++;
@@ -117,14 +117,14 @@ void eeBlockWrite(byte magic, int eeaddr, const void* address, int size) {
   }
   EEPROM.write(eeaddr, hash);
   if (debugEEPROM) {
-    Serial.println();
-    Serial.print(F("Checksum: ")); Serial.println(hash, HEX); Serial.println();
+    Console.println();
+    Console.print(F("Checksum: ")); Console.println(hash, HEX); Console.println();
   }
 }
 
 void eeBlockRead2(int eeaddr, void* address, int size) {
   if (debugControl) {
-    Serial.print(F("Reading EEPROM ")); Serial.print(eeaddr, HEX); Serial.print(F(":")); Serial.print(size); Serial.print(F(", dest: ")); Serial.println((int)address, HEX);
+    Console.print(F("Reading EEPROM ")); Console.print(eeaddr, HEX); Console.print(F(":")); Console.print(size); Console.print(F(", dest: ")); Console.println((int)address, HEX);
   }
   int a = eeaddr;
   byte x;
@@ -132,7 +132,7 @@ void eeBlockRead2(int eeaddr, void* address, int size) {
   for (int i = 0; i < size; i++, a++) {
     x = EEPROM.read(a);
     if (debugEEPROM) {
-      Serial.print(x, HEX);
+      Console.print(x, HEX);
     }
     *ptr = x;
     ptr++;
@@ -145,7 +145,7 @@ void eeBlockRead2(int eeaddr, void* address, int size) {
 */
 boolean eeBlockRead(byte magic, int eeaddr, void* address, int size) {
   if (debugControl) {
-    Serial.print(F("Reading EEPROM ")); Serial.print(eeaddr, HEX); Serial.print(F(":")); Serial.print(size); Serial.print(F(", dest: ")); Serial.println((int)address, HEX);
+    Console.print(F("Reading EEPROM ")); Console.print(eeaddr, HEX); Console.print(F(":")); Console.print(size); Console.print(F(", dest: ")); Console.println((int)address, HEX);
   }
   int a = eeaddr;
   byte hash = magic;
@@ -153,29 +153,29 @@ boolean eeBlockRead(byte magic, int eeaddr, void* address, int size) {
   x = EEPROM.read(a);
   if (x != magic) {
     if (debugControl) {
-      Serial.println(F("No magic header found"));
+      Console.println(F("No magic header found"));
     }
     return false;
   }
   if (debugEEPROM) {
-    Serial.print(F("magic:")); Serial.println(x, HEX);
+    Console.print(F("magic:")); Console.println(x, HEX);
   }
   a++;
   for (int i = 0; i < size; i++, a++) {
     x = EEPROM.read(a);
     if (debugEEPROM) {
-      Serial.print(x, HEX);
+      Console.print(x, HEX);
     }
     hash = hash ^ x;
   }
   x = EEPROM.read(a);
   if (debugEEPROM) {
-    Serial.println();
-    Serial.print(F("Computed checksum: ")); Serial.println(hash, HEX); Serial.print(F("  read checksum: ")); Serial.println(x, HEX);
+    Console.println();
+    Console.print(F("Computed checksum: ")); Console.println(hash, HEX); Console.print(F("  read checksum: ")); Console.println(x, HEX);
   }
   if (hash != x) {
     if (debugControl) {
-      Serial.println(F("Checksum does not match"));
+      Console.println(F("Checksum does not match"));
     }
     return false;
   }

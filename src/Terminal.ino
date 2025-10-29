@@ -69,8 +69,8 @@ void processLineCommand() {
     inputPos = pos + 1;
   }
   if (debugInfra) {
-    Serial.print(F("Command: "));
-    Serial.println(inputLine);
+    Console.print(F("Command: "));
+    Console.println(inputLine);
   }
   for (int i = 0; i < maxLineCommands; i++) {
     LineCommand& c = lineCommands[i];
@@ -92,19 +92,19 @@ void processLineCommand() {
       goto end;
     }
     if (debugInfra) {
-      Serial.print(F("Trying handler for command "));
-      Serial.println(c.cmd);
+      Console.print(F("Trying handler for command "));
+      Console.println(c.cmd);
     }
     if (debugInfra) {
-      Serial.print(F("Remainder of command "));
-      Serial.println(inputPos);
+      Console.print(F("Remainder of command "));
+      Console.println(inputPos);
     }
     c.handler();
     return;
 
 end:;
   }
-  Serial.println(F("\nBad command"));
+  Console.println(F("\nBad command"));
 }
 
 void printPrompt() {
@@ -114,13 +114,13 @@ void printPrompt() {
   if (charModeCallback != NULL) {
     return;
   }
-  Serial.print("@ > ");
+  Console.print("@ > ");
 }
 
 
 void processTerminal() {
-  while (Serial.available()) {
-    char c = (char)Serial.read();
+  while (Console.available()) {
+    char c = (char)Console.read();
     if (charModeCallback != NULL) {
       if (c == '`') {
         // reset from the character mode
@@ -132,7 +132,7 @@ void processTerminal() {
       continue;
     }
     if (c == 0x7f || c == '\b') {
-      Serial.write(c);
+      Console.write(c);
       if (inputPos > inputLine) {
         inputPos--;
         *inputPos = 0;
@@ -140,13 +140,13 @@ void processTerminal() {
       continue;
     }
     if (c == '\n' || c == '\r') {
-      Serial.write("\r\n");
+      Console.write("\r\n");
       processLineCommand();
       clearInputLine();
       printPrompt();
       continue;
     }
-    Serial.write(c);
+    Console.write(c);
     if ((inputPos - inputLine) >= MAX_LINE) {
       continue;
     }

@@ -22,6 +22,12 @@
 #include "Terminal.h"
 #include "DecoderEnv.h"
 
+#ifdef AVR_DEBUG
+
+#include "avr8-stub.h"
+
+#endif
+
 #define Shift
 
 // ------- Diagnostic setup -----------
@@ -48,6 +54,9 @@ unsigned char minBrightness = 0;
 unsigned char pwmFrequency = 60;
 const bool ShiftPWM_balanceLoad = false;
 const bool ShiftPWM_invertOutputs = true;
+
+// original:
+//#define SHIFTPWM_USE_TIMER2
 #define SHIFTPWM_USE_TIMER2
 
 // must be included after #define for timer
@@ -114,9 +123,9 @@ uint8_t numSignalNumber;
 uint8_t fadeRate;
 
 #ifdef DEBUG_UART0
-HardwareSerial& console = Serial1;
+HardwareSerial& Console = Serial1;
 #else
-HardwareSerial& console = Serial;
+HardwareSerial& Console = Serial;
 #endif
 
 
@@ -124,11 +133,15 @@ HardwareSerial& console = Serial;
  * Setup Arduino.
  */
 void setup() {
-  Serial.begin(115200);
-  Serial.print(F("UNI16ARD-NAV-Shift version "));
-  Serial.println(SW_VERSION);
-  Serial.println(F("Copyright (c) 2018, Petr Sidlo <sidlo64@seznam.cz>\nCopyright (c) 2022, Svatopluk Dedic <svatopluk.dedic@gmail.com>, APL 2.0 License"));
-  Serial.println(F("Booting..."));
+#ifdef AVR_DEBUG
+  debug_init();
+#endif
+
+  Console.begin(115200);
+  Console.print(F("UNI16ARD-NAV-Shift version "));
+  Console.println(SW_VERSION);
+  Console.println(F("Copyright (c) 2018, Petr Sidlo <sidlo64@seznam.cz>\nCopyright (c) 2022, Svatopluk Dedic <svatopluk.dedic@gmail.com>, APL 2.0 License"));
+  Console.println(F("Booting..."));
 
   // initialize the digital pins as an outputs
   pinMode(ACK_BUSY_PIN, OUTPUT);
@@ -151,11 +164,11 @@ void setup() {
   initLocalVariables();
   ModuleChain::invokeAll(initialize);
 
-  Serial.print(F("Driving max "));
-  Serial.print(NUM_OUTPUTS);
-  Serial.print(F(" outputs from max "));
-  Serial.print(NUM_SIGNAL_MAST);
-  Serial.println(F(" masts"));
+  Console.print(F("Driving max "));
+  Console.print(NUM_OUTPUTS);
+  Console.print(F(" outputs from max "));
+  Console.print(NUM_SIGNAL_MAST);
+  Console.println(F(" masts"));
 
   initTerminal();
   setupTerminal();
@@ -205,9 +218,9 @@ void loop() {
 int findSignalIndex(int address, int& position) {
   for (int i = 0; i < NUM_SIGNAL_MAST; i++) {
     int num = signalMastNumberAddress[i];
-    // Serial.print("Mast "); Serial.print(i); Serial.print(" Addresses: "); Serial.println(num);
+    // Console.print("Mast "); Console.print(i); Console.print(" Addresses: "); Console.println(num);
     if (address < num) {
-      // Serial.print("Found index "); Serial.print(i); Serial.print(" pos "); Serial.println(address);
+      // Console.print("Found index "); Console.print(i); Console.print(" pos "); Console.println(address);
       position = address;
       return i;
     }
@@ -217,13 +230,13 @@ int findSignalIndex(int address, int& position) {
 }
 
 void notifyDccAccTurnoutOutput(uint16_t Addr, uint8_t Direction, uint8_t OutputPower) {
-  Serial.println("DCC turnout");
+  Console.println("DCC turnout");
   if (rocoAddress) {
     Addr = Addr + 4;
   }
-  // Serial.print("Addr = "); Serial.println(Addr);
-  // Serial.print("Min = "); Serial.println(thisDecoderAddress);
-  // Serial.print("Max = "); Serial.println(maxDecoderAddress);
+  // Console.print("Addr = "); Console.println(Addr);
+  // Console.print("Min = "); Console.println(thisDecoderAddress);
+  // Console.print("Max = "); Console.println(maxDecoderAddress);
   if ((Addr < thisDecoderAddress)
       || (Addr >= maxDecoderAddress)) {
     return;
@@ -231,7 +244,7 @@ void notifyDccAccTurnoutOutput(uint16_t Addr, uint8_t Direction, uint8_t OutputP
 
   int pos;
   int signalIndex = findSignalIndex(Addr - thisDecoderAddress, pos);
-  // Serial.print(F("Turnout: ")); Serial.print(Addr); Serial.print(F(" = mast: ")); Serial.print(signalIndex); Serial.print(F(" pos: ")); Serial.print(pos); Serial.print(F(" dir: ")); Serial.println(Direction);
+  // Console.print(F("Turnout: ")); Console.print(Addr); Console.print(F(" = mast: ")); Console.print(signalIndex); Console.print(F(" pos: ")); Console.print(pos); Console.print(F(" dir: ")); Console.println(Direction);
 
   if (signalIndex == -1) {
     return;
@@ -280,23 +293,23 @@ const uint8_t noSignalMastOutputs[] PROGMEM = {
 };
 
 void setFactoryDefault() {
-  Serial.println(F("Resetting to factory defaults"));
+  Console.println(F("Resetting to factory defaults"));
   uint8_t FactoryDefaultCVSize = sizeof(FactoryDefaultCVs) / sizeof(CVPair);
 
-  Serial.println(F("Setting default CV values"));
+  Console.println(F("Setting default CV values"));
   for (uint16_t i = 0; i < FactoryDefaultCVSize; i++) {
     Dcc.setCV(FactoryDefaultCVs[i].CV, FactoryDefaultCVs[i].Value);
   }
 
   int cvNumber = START_CV_OUTPUT;
   int pgmIndex = (int)(void*)factorySignalMastOutputs;
-  Serial.println(F("Copying factorySignalMastOutputs"));
+  Console.println(F("Copying factorySignalMastOutputs"));
   for (unsigned int i = 0; i < sizeof(factorySignalMastOutputs); i++, cvNumber++) {
-    Serial.print(F("CV ")); Serial.print(cvNumber); Serial.print(F(":=")); Serial.println(pgm_read_byte_near(pgmIndex + i));
+    Console.print(F("CV ")); Console.print(cvNumber); Console.print(F(":=")); Console.println(pgm_read_byte_near(pgmIndex + i));
     Dcc.setCV(cvNumber, pgm_read_byte_near(pgmIndex + i));
   }
 
-  Serial.println(F("Clearing rest of signal CVs"));
+  Console.println(F("Clearing rest of signal CVs"));
 
   for (unsigned int i = sizeof(factorySignalMastOutputs) / SEGMENT_SIZE; i < NUM_SIGNAL_MAST; i++) {
     for (unsigned int j = 0; j < sizeof(noSignalMastOutputs); j++, cvNumber++) {
@@ -304,7 +317,7 @@ void setFactoryDefault() {
     }
   }
 
-  Serial.println(F("Generating aspect table"));
+  Console.println(F("Generating aspect table"));
 
   uint16_t OutputCV = START_CV_ASPECT_TABLE;
   for (uint16_t i = 0; i < NUM_SIGNAL_MAST; i++) {
@@ -315,13 +328,13 @@ void setFactoryDefault() {
   }
 
   // define CVs based on the predefined templates:
-  // Serial.print(F("pgmIndex base ")); Serial.println((int)factorySignalMastOutputs, HEX);
-  // Serial.print(F(" count ")); Serial.println(sizeof(factorySignalMastOutputs) / sizeof(factorySignalMastOutputs[0]));
+  // Console.print(F("pgmIndex base ")); Console.println((int)factorySignalMastOutputs, HEX);
+  // Console.print(F(" count ")); Console.println(sizeof(factorySignalMastOutputs) / sizeof(factorySignalMastOutputs[0]));
   for (unsigned int mast = 0; mast < sizeof(factorySignalMastOutputs) / sizeof(factorySignalMastOutputs[0]); mast++) {
     const MastSettings& settingsDef = factorySignalMastOutputs[mast];
     
-    // Serial.print(F("pgmIndex for mast ")); Serial.print(mast); Serial.print(F(" = ")); Serial.println((int)(&settingsDef), HEX);
-    // Serial.print(F("cvBase for mast ")); Serial.print(mast); Serial.print(F(" = ")); Serial.println(cvBase);
+    // Console.print(F("pgmIndex for mast ")); Console.print(mast); Console.print(F(" = ")); Console.println((int)(&settingsDef), HEX);
+    // Console.print(F("cvBase for mast ")); Console.print(mast); Console.print(F(" = ")); Console.println(cvBase);
     int pgmIndex = (int)(&settingsDef.signalSetOrMastType);
     
     byte signalSetOrMastType = pgm_read_byte_near(pgmIndex);
@@ -335,7 +348,7 @@ void setFactoryDefault() {
 const struct MastTypeDefinition& copySignalMastTypeDefinition(byte typeId);
 
 void doChangeMastType(int mast, int signalSetOrMastType, boolean stable) {
-  Serial.print(F("Using template for mast ")); Serial.println(mast);
+  Console.print(F("Using template for mast ")); Console.println(mast);
 
   const MastSettings& settingsDef = ((MastSettings*)factorySignalMastOutputs)[mast];
   int cvBase = (sizeof(MastSettings) * mast) + START_CV_OUTPUT;
@@ -343,16 +356,16 @@ void doChangeMastType(int mast, int signalSetOrMastType, boolean stable) {
   int codeCount = def.codeCount;
   //int lightCount = def.lightCount;
 
-  printByteBuffer((byte*)&def, sizeof(def)); Serial.println();
+  printByteBuffer((byte*)&def, sizeof(def)); Console.println();
   saveTemplateOutputsToCVs(def, mast, stable);
 
   int cv = cvBase + ((int)(&settingsDef.defaultCodeOrAspect)) - ((int)(&settingsDef));
   byte val = def.defaultCode;
-  Serial.print(F("Setting cv default code ")); Serial.print(cv); Serial.print(F(" to ")); Serial.println(val);
+  Console.print(F("Setting cv default code ")); Console.print(cv); Console.print(F(" to ")); Console.println(val);
   Dcc.setCV(cv, val);
   cv++;
   val = findRequiredAddrCount(codeCount, signalSetOrMastType);
-  Serial.print(F("Setting cv addresses ")); Serial.print(cv); Serial.print(F(" to ")); Serial.println(val);
+  Console.print(F("Setting cv addresses ")); Console.print(cv); Console.print(F(" to ")); Console.println(val);
   Dcc.setCV(cv, val);
 
   cv = START_CV_ASPECT_TABLE + mast * maxAspects;
@@ -386,14 +399,14 @@ byte getMastTypeOrSignalSet(int mastIndex) {
 void printByteBuffer(const byte* buf, int size) {
   for (int i = 0; i < size; i++) {
     if (i > 0) {
-      Serial.print('-');
+      Console.print('-');
     }
     int n = *buf;
     buf++;
     if (n < 0x10) {
-      Serial.print('0');
+      Console.print('0');
     }
-    Serial.print(n, HEX);
+    Console.print(n, HEX);
   }
 }
 
@@ -475,7 +488,7 @@ int findNextLight(int mast) {
   byte type;
   do {
     cvStart = START_CV_OUTPUT + prevMast * SEGMENT_SIZE;
-    //Serial.print(F("cvStart ")); Serial.println(cvStart);
+    //Console.print(F("cvStart ")); Console.println(cvStart);
     type = Dcc.getCV(cvStart + maxOutputsPerMast);    
     if (type > 0) {
       break;
@@ -486,7 +499,7 @@ int findNextLight(int mast) {
     return 1;
   }
   int max = -1;
-  //Serial.print(F("Searching from ")); Serial.println(cvStart);
+  //Console.print(F("Searching from ")); Console.println(cvStart);
   for (int i = cvStart; i < cvStart + maxOutputsPerMast; i++) {
     int x = Dcc.getCV(i);
     if (x == ONA || x > NUM_OUTPUTS) {
@@ -500,11 +513,11 @@ int findNextLight(int mast) {
 }
 
 void saveTemplateAspectsToCVs(int mast, int signalSetOrMastType) {
-  Serial.print(F("Using template aspects for mast ")); Serial.println(mast);
+  Console.print(F("Using template aspects for mast ")); Console.println(mast);
 
   const struct MastTypeDefinition& def = copySignalMastTypeDefinition(toTemplateIndex(signalSetOrMastType));
 
-  printByteBuffer((byte*)&def.code2Aspect, sizeof(def.code2Aspect)); Serial.println();
+  printByteBuffer((byte*)&def.code2Aspect, sizeof(def.code2Aspect)); Console.println();
 
   int cv = START_CV_ASPECT_TABLE + mast * maxAspects;
   for (unsigned int i = 0; i < sizeof(def.code2Aspect); i++) {
@@ -514,7 +527,7 @@ void saveTemplateAspectsToCVs(int mast, int signalSetOrMastType) {
 }  
 
 void saveTemplateOutputsToCVs(const struct MastTypeDefinition& def, int mastIndex, boolean stable) {
-  Serial.print(F("Setting outputs to mast #")); Serial.print(mastIndex); Serial.print(F(" from def ")); Serial.println((int)(int*)(&def), HEX);
+  Console.print(F("Setting outputs to mast #")); Console.print(mastIndex); Console.print(F(" from def ")); Console.println((int)(int*)(&def), HEX);
   int minLightNumber = findMinLightIndex(mastIndex);
   //int oldLightCount = findLightCount(mastIndex);
   int from = findNextLight(mastIndex);
@@ -537,7 +550,7 @@ void saveTemplateOutputsToCVs(const struct MastTypeDefinition& def, int mastInde
     } else {
       n = ONA;
     }
-    Serial.print(F("Set CV ")); Serial.print(cvIndex); Serial.print(F(" := ")); Serial.println(n);
+    Console.print(F("Set CV ")); Console.print(cvIndex); Console.print(F(" := ")); Console.println(n);
     Dcc.setCV(cvIndex, n);
     cvIndex++;
   }
@@ -558,12 +571,12 @@ int reassignMastOutputs(int mastIndex, int from, boolean propagate) {
     for (nextMast = mastIndex + 1; nextMast < NUM_SIGNAL_MAST; nextMast++) {
       int cvStart = START_CV_OUTPUT + nextMast * SEGMENT_SIZE;
       byte type = Dcc.getCV(cvStart + maxOutputsPerMast);
-      //Serial.print("Next mast: "); Serial.print(nextMast); Serial.print(" type "); Serial.println(type, HEX);
+      //Console.print("Next mast: "); Console.print(nextMast); Console.print(" type "); Console.println(type, HEX);
       if (type == 0) {
         continue;
       }
       int min = findMinLightIndex(nextMast);
-      //Serial.print("minLight: "); Serial.print(min);  Serial.print(" nextInput "); Serial.println(nextInput);
+      //Console.print("minLight: "); Console.print(min);  Console.print(" nextInput "); Console.println(nextInput);
       if (min == nextInput) {
         return -1;
       }
@@ -581,7 +594,7 @@ int reassignMastOutputs2(int mastIndex, int from) {
 
   int lastOutput = -1;
 
-  Serial.print(F("Reassigning outputs for ")); Serial.print(mastIndex); Serial.print(F(" start from ")); Serial.println(from);
+  Console.print(F("Reassigning outputs for ")); Console.print(mastIndex); Console.print(F(" start from ")); Console.println(from);
 
   for (unsigned int i = 0; i < sizeof(MastSettings::outputs); i++) {
     byte n = Dcc.getCV(cvIndex);
@@ -607,7 +620,7 @@ void maybeInitLocalVariables() {
   if (!reinitializeLocalVariables) {
     return;
   }
-  Serial.println("Reinitializing...");
+  Console.println("Reinitializing...");
   reinitializeLocalVariables = false;
   lsb = Dcc.getCV(CV_ACCESSORY_DECODER_ADDRESS_LSB);
   msb = Dcc.getCV(CV_ACCESSORY_DECODER_ADDRESS_MSB);
@@ -693,7 +706,7 @@ void initLocalVariablesSignalMast() {
 
     signalMastDefaultAspectIdx[i] = defaultAspectIdx;
     signalMastNumberAddress[i] = Dcc.getCV(counter);
-    // Serial.print(F("Addresses: ")); Serial.println(signalMastNumberAddress[i]);
+    // Console.print(F("Addresses: ")); Console.println(signalMastNumberAddress[i]);
     counter++;
 
     signalMastNumberSigns[i] = findNumberOfSignals(signalMastNumberAddress[i], mastTypeOrSignalSet);
@@ -712,7 +725,7 @@ void initLocalVariablesSignalMast() {
   for (int i = 0; i < numSignalNumber; i++) {
     maxDecoderAddress = maxDecoderAddress + signalMastNumberAddress[i];
   }
-  // Serial.print(F("Max address: ")); Serial.println(maxDecoderAddress);
+  // Console.print(F("Max address: ")); Console.println(maxDecoderAddress);
 
   for (int i = 0; i < numSignalNumber; i++) {
     signalMastLastCode[i] = signalMastDefaultAspectIdx[i];
@@ -777,16 +790,16 @@ void changeLightState2(byte lightOutput, struct LightFunction newState) {
   lightOutput--;
   LightFunction& bs = bublState2[lightOutput];
   if (debugLights) {
-    Serial.print(F("Change light #"));
-    Serial.print(lightOutput);
-    Serial.print(F(" curState: "));
-    Serial.print(bs.sign);
-    Serial.print(F(", off = "));
-    Serial.print(bs.off);
-    Serial.print(F(", newstate: "));
-    Serial.print(newState.sign);
-    Serial.print(F(", off = "));
-    Serial.println(newState.off);
+    Console.print(F("Change light #"));
+    Console.print(lightOutput);
+    Console.print(F(" curState: "));
+    Console.print(bs.sign);
+    Console.print(F(", off = "));
+    Console.print(bs.off);
+    Console.print(F(", newstate: "));
+    Console.print(newState.sign);
+    Console.print(F(", off = "));
+    Console.println(newState.off);
   }
 
   boolean wasOff = bs.off;
@@ -803,12 +816,12 @@ void changeLightState2(byte lightOutput, struct LightFunction newState) {
     bs.off = !wasOff;
   }
   if (debugLights) {
-    Serial.print(F("Change light #"));
-    Serial.print(lightOutput);
-    Serial.print(F(" newState: "));
-    Serial.print(bublState2[lightOutput].sign);
-    Serial.print(F(", off = "));
-    Serial.println(bublState2[lightOutput].off);
+    Console.print(F("Change light #"));
+    Console.print(lightOutput);
+    Console.print(F(" newState: "));
+    Console.print(bublState2[lightOutput].sign);
+    Console.print(F(", off = "));
+    Console.println(bublState2[lightOutput].off);
   }
 }
 
@@ -843,10 +856,10 @@ void processBulbBlinking(int nrOutput, unsigned int blinkDelay) {
   if (elapsed > fadeTimeLight[10]) {
     if (!bublState2[nrOutput].end) {
       if (debugLightFlip) {
-        Serial.print(F("Light elapsed "));
-        Serial.print(nrOutput);
-        Serial.print(F(" off = "));
-        Serial.println(off);
+        Console.print(F("Light elapsed "));
+        Console.print(nrOutput);
+        Console.print(F(" off = "));
+        Console.println(off);
       }
       bublState2[nrOutput].end = true;
       setPWM(nrOutput, off ? minBrightness : maxBrightness);
@@ -855,8 +868,8 @@ void processBulbBlinking(int nrOutput, unsigned int blinkDelay) {
     if (blinkDelay > 0) {
       if (elapsed > blinkDelay) {
         if (debugLightFlip) {
-          Serial.print(F("Light blinked "));
-          Serial.println(nrOutput);
+          Console.print(F("Light blinked "));
+          Console.println(nrOutput);
         }
         bublState2[nrOutput].end = false;
         bublState2[nrOutput].off = !off;
@@ -865,10 +878,10 @@ void processBulbBlinking(int nrOutput, unsigned int blinkDelay) {
     } else {
       // disable state changes.
       if (debugLightFlip) {
-        Serial.print(F("Light fixed "));
-        Serial.print(nrOutput);
-        Serial.print(F(" state "));
-        Serial.println(!off);
+        Console.print(F("Light fixed "));
+        Console.print(nrOutput);
+        Console.print(F(" state "));
+        Console.println(!off);
       }
       lightStartTimeBubl[nrOutput] = 0;
     }
@@ -887,18 +900,18 @@ void processBulbBlinking(int nrOutput, unsigned int blinkDelay) {
  */
 void signalMastChangePos(int nrSignalMast, uint16_t pos, uint8_t Direction) {
   if (nrSignalMast >= NUM_SIGNAL_MAST) {
-    Serial.print(F("Error: mastChangePos mast out of range: "));
-    Serial.println(nrSignalMast);
+    Console.print(F("Error: mastChangePos mast out of range: "));
+    Console.println(nrSignalMast);
     return;
   }
   if (pos >= signalMastNumberAddress[nrSignalMast]) {
-    Serial.print(F("Error: mastChangePos pos out of range"));
-    Serial.println(pos);
+    Console.print(F("Error: mastChangePos pos out of range"));
+    Console.println(pos);
     return;
   }
   
   byte newAspectIdx = signalMastLastCode[nrSignalMast];
-  // Serial.print("existing aspect: "); Serial.println(newAspectIdx);
+  // Console.print("existing aspect: "); Console.println(newAspectIdx);
   byte type = getMastTypeOrSignalSet(nrSignalMast);
   switch (type & signalSetControlType) {
     case turnoutNoDirection:
@@ -914,21 +927,21 @@ void signalMastChangePos(int nrSignalMast, uint16_t pos, uint8_t Direction) {
       break;
     // signal controlled by a binary number encoded into turnout states
     case bitwiseControl:
-      // Serial.println("Bitwise");
+      // Console.println("Bitwise");
       bitWrite(newAspectIdx, pos, Direction);
       break;
   }
   newAspectIdx = newAspectIdx & 0x1f;
-  // Serial.print(F("mast: ")); Serial.print(nrSignalMast); Serial.print(F(" type:")); Serial.print(type, HEX); Serial.print(F(" pos: ")); Serial.print(pos); Serial.print(F(" dir:")); Serial.println(Direction);
-  // Serial.print(F("new aspect: ")); Serial.println(newAspectIdx);
+  // Console.print(F("mast: ")); Console.print(nrSignalMast); Console.print(F(" type:")); Console.print(type, HEX); Console.print(F(" pos: ")); Console.print(pos); Console.print(F(" dir:")); Console.println(Direction);
+  // Console.print(F("new aspect: ")); Console.println(newAspectIdx);
 
   if (signalMastLastCode[nrSignalMast] == newAspectIdx) {
     return;
   }
 
   if (newAspectIdx >= maxAspects) {
-    Serial.print(F("Error: newAspectIdx out of range"));
-    Serial.println(newAspectIdx);
+    Console.print(F("Error: newAspectIdx out of range"));
+    Console.println(newAspectIdx);
     return;
   }
 
@@ -1008,19 +1021,19 @@ void signalMastChangeAspect(int nrSignalMast, byte newAspect) {
  */
 void signalMastChangeAspect(int progMemOffset, int tableSize, int nrSignalMast, byte newAspect) {
   if (debugAspects) {
-    Serial.print(F("Change mast "));
-    Serial.print(nrSignalMast);
-    Serial.print(F(" to aspect "));
-    Serial.println(newAspect);
+    Console.print(F("Change mast "));
+    Console.print(nrSignalMast);
+    Console.print(F(" to aspect "));
+    Console.println(newAspect);
   }
   if (nrSignalMast < 0 || nrSignalMast >= NUM_SIGNAL_MAST) {
-    Serial.print(F("Invalid mast "));
-    Serial.println(nrSignalMast);
+    Console.print(F("Invalid mast "));
+    Console.println(nrSignalMast);
     return;
   }
   if (newAspect >= tableSize) {
-    Serial.print(F("Invalid aspect "));
-    Serial.println(newAspect);
+    Console.print(F("Invalid aspect "));
+    Console.println(newAspect);
     return;
   }
   signalMastCurrentAspect[nrSignalMast] = newAspect;
@@ -1040,7 +1053,7 @@ void signalMastChangeAspect(int progMemOffset, int tableSize, int nrSignalMast, 
   for (int i = 0; i < maxOutputsPerMast; i++) {
     int nOutput = Dcc.getCV(cvBase + i);
     if (debugAspects) {
-      Serial.print("Change output "); Serial.print(nOutput); Serial.print(" => "); Serial.println(*(byte*)(void*)&buffer[i]);
+      Console.print("Change output "); Console.print(nOutput); Console.print(" => "); Console.println(*(byte*)(void*)&buffer[i]);
     }
     changeLightState2(nOutput, buffer[i]);
   }
@@ -1065,15 +1078,15 @@ void processFadeOnOrOff(byte nrOutput, boolean fadeOn) {
 
   if (debugFadeOnOff) {
     if (fadeOn) {
-      Serial.print(F("Fade ON, output="));
+      Console.print(F("Fade ON, output="));
     } else {
-      Serial.print(F("Fade OFF, output="));
+      Console.print(F("Fade OFF, output="));
     }
-    Serial.print(nrOutput);
+    Console.print(nrOutput);
   }
   if (elapsed > fadeTimeLight[limit - 1]) {
     if (debugFadeOnOff) {
-      Serial.println(F("Reached limit"));
+      Console.println(F("Reached limit"));
     }
     setPWM(nrOutput, fadeOn ? maxBrightness : minBrightness);
     return;
@@ -1095,16 +1108,16 @@ void processFadeOnOrOff(byte nrOutput, boolean fadeOn) {
     pwm = maxBrightness - pwm;
   }
   if (debugFadeOnOff) {
-    Serial.print(" idx=");
-    Serial.print(idx);
-    Serial.print(", counters: ");
-    Serial.print(FADE_COUNTER_LIGHT_1[idx]);
-    Serial.print("/");
-    Serial.print(FADE_COUNTER_LIGHT_2[idx]);
-    Serial.print(", pwm = ");
-    Serial.print(pwm);
-    Serial.print(", time=");
-    Serial.println(elapsed);
+    Console.print(" idx=");
+    Console.print(idx);
+    Console.print(", counters: ");
+    Console.print(FADE_COUNTER_LIGHT_1[idx]);
+    Console.print("/");
+    Console.print(FADE_COUNTER_LIGHT_2[idx]);
+    Console.print(", pwm = ");
+    Console.print(pwm);
+    Console.print(", time=");
+    Console.println(elapsed);
   }
   setPWM(nrOutput, pwm);
 }
@@ -1124,18 +1137,18 @@ void processFadeOn(byte nrOutput) {
   setPWM(nrOutput, pwm);
 
   if (debugFadeOnOff) {
-    Serial.print("Fade ON, output=");
-    Serial.print(nrOutput);
-    Serial.print("idx=");
-    Serial.print(idx);
-    Serial.print(", counters: ");
-    Serial.print(FADE_COUNTER_LIGHT_1[idx]);
-    Serial.print("/");
-    Serial.print(FADE_COUNTER_LIGHT_2[idx]);
-    Serial.print(", time=");
-    Serial.print(elapsed);
-    Serial.print(" pwm=");
-    Serial.println(pwm);
+    Console.print("Fade ON, output=");
+    Console.print(nrOutput);
+    Console.print("idx=");
+    Console.print(idx);
+    Console.print(", counters: ");
+    Console.print(FADE_COUNTER_LIGHT_1[idx]);
+    Console.print("/");
+    Console.print(FADE_COUNTER_LIGHT_2[idx]);
+    Console.print(", time=");
+    Console.print(elapsed);
+    Console.print(" pwm=");
+    Console.println(pwm);
   }
 }
 
@@ -1157,17 +1170,17 @@ void processFadeOff(byte nrOutput) {
   setPWM(nrOutput, pwm);
 
   if (debugFadeOnOff) {
-    Serial.print("Fade OFF, output=");
-    Serial.print(nrOutput);
-    Serial.print("idx=");
-    Serial.print(", counters: ");
-    Serial.print(FADE_COUNTER_LIGHT_1[idx]);
-    Serial.print("/");
-    Serial.print(FADE_COUNTER_LIGHT_2[idx]);
-    Serial.print(", time=");
-    Serial.print(elapsed);
-    Serial.print(" pwm=");
-    Serial.println(pwm);
+    Console.print("Fade OFF, output=");
+    Console.print(nrOutput);
+    Console.print("idx=");
+    Console.print(", counters: ");
+    Console.print(FADE_COUNTER_LIGHT_1[idx]);
+    Console.print("/");
+    Console.print(FADE_COUNTER_LIGHT_2[idx]);
+    Console.print(", time=");
+    Console.print(elapsed);
+    Console.print(" pwm=");
+    Console.println(pwm);
   }
 }
 
@@ -1210,10 +1223,10 @@ void notifyCVChange(uint16_t CV, uint8_t Value) {
 
 void notifyDccCVChange(uint16_t CV, uint8_t Value) {
   /*
-  Serial.print(F("DCC CV changed: "));
-  Serial.print(CV);
-  Serial.print(F(" := "));
-  Serial.println(Value);
+  Console.print(F("DCC CV changed: "));
+  Console.print(CV);
+  Console.print(F(" := "));
+  Console.println(Value);
   */
   if (CV == CV_ACCESSORY_DECODER_ADDRESS_LSB) {
     lsb = Value;
@@ -1346,7 +1359,7 @@ const struct MastTypeDefinition& copySignalMastTypeDefinition(byte typeId) {
   if (typeId >= mastTypeDefinitionCount) {
     typeId = 0;
   }
-  // Serial.print(F("Copy from id ")); Serial.println(typeId);
+  // Console.print(F("Copy from id ")); Console.println(typeId);
   static MastTypeDefinition buffer;
   int progMemOffset = (int)(void*)(mastTypeDefinitions + typeId);
   byte* out = (byte*)(void*)&(buffer);
