@@ -88,52 +88,8 @@ unsigned long currentTime;
  */
 unsigned long aspectLag;
 
-class SignalMastData {
-public:
-  SignalSet set : 3;
-  byte addrOffset;
-  byte signalCount : 4; // maxOutputsPerMast
-  byte currentAspect : 5; // maxAspects
-  byte lastCode : 5;  // last code set to the signal
-  unsigned int lastTime;  // time the last code was set
-  boolean changed : 1;  // lastCode was set, but not converted to the aspect.
+SignalMastData signalMastData[NUM_SIGNAL_MAST];
 
-  SignalMastData() : set(SIGNAL_SET_CSD_BASIC), addrOffset(0), signalCount(0), currentAspect(0), lastCode(0), lastTime(0), changed(false) {}
-
-  boolean isReadyForProcess() {
-    if (!changed) {
-      return false;
-    }
-    long diff = (currentTime & 0xffff)- lastTime;
-    if (diff < 0) {
-      diff += 0x10000;
-    }
-    if (diff < 0) {
-      changed = false;
-      return false;
-    }
-    return (unsigned long)diff > aspectLag;
-  }
-
-  void setCode(byte c) {
-    changed = true;
-    lastCode = c;
-    lastTime = currentTime & 0xffff;
-  }
-
-  void processed() {
-    changed = false;
-    lastTime = 0;
-    lastCode = 0;
-  }
-};
-
-static_assert(maxOutputsPerMast <= 16,  "Too many signals");
-static_assert(maxAspects <= 32, "Too many aspects");
-
-SignalSet signalMastSignalSet[NUM_SIGNAL_MAST] = { SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC };  // signal set
-
-byte signalMastNumberAddress[NUM_SIGNAL_MAST] = { 1, 1, 1, 1, 1, 1, 1, 1 };  // number of address
 // probably useless, seems to be used only during configuration and can be computed
 byte signalMastNumberSigns[NUM_SIGNAL_MAST] = { };  // number of signals
 
@@ -262,7 +218,7 @@ void loop() {
  */
 int findSignalIndex(int address, int& position) {
   for (int i = 0; i < NUM_SIGNAL_MAST; i++) {
-    int num = signalMastNumberAddress[i];
+    int num = signalMastData[i].addressCount;
     // Console.print("Mast "); Console.print(i); Console.print(" Addresses: "); Console.println(num);
     if (address < num) {
       // Console.print("Found index "); Console.print(i); Console.print(" pos "); Console.println(address);
@@ -744,17 +700,17 @@ void initLocalVariablesSignalMast() {
       signalSet = 0;
     }
 
-    ((byte&)signalMastSignalSet[i]) = signalSet;
+    signalMastData[i].set = (SignalSet)signalSet;
 
     byte defaultAspectIdx = Dcc.getCV(counter);
     counter++;
 
     signalMastDefaultAspectIdx[i] = defaultAspectIdx;
-    signalMastNumberAddress[i] = Dcc.getCV(counter);
+    signalMastData[i].addressCount = Dcc.getCV(counter);
     // Console.print(F("Addresses: ")); Console.println(signalMastNumberAddress[i]);
     counter++;
 
-    signalMastNumberSigns[i] = findNumberOfSignals(signalMastNumberAddress[i], mastTypeOrSignalSet);
+    signalMastNumberSigns[i] = findNumberOfSignals(signalMastData[i].addressCount, mastTypeOrSignalSet);
 
     for (int i = 0; i < NUM_OUTPUTS; i++) {
       boolean used = bitRead(usedOutputs[i / 8], i % 8);
@@ -768,7 +724,7 @@ void initLocalVariablesSignalMast() {
 
   maxDecoderAddress = thisDecoderAddress;
   for (int i = 0; i < numSignalNumber; i++) {
-    maxDecoderAddress = maxDecoderAddress + signalMastNumberAddress[i];
+    maxDecoderAddress = maxDecoderAddress + signalMastData[i].addressCount;
   }
   // Console.print(F("Max address: ")); Console.println(maxDecoderAddress);
 
@@ -949,7 +905,7 @@ void signalMastChangePos(int nrSignalMast, uint16_t pos, uint8_t Direction) {
     Console.println(nrSignalMast);
     return;
   }
-  if (pos >= signalMastNumberAddress[nrSignalMast]) {
+  if (pos >= signalMastData[nrSignalMast].addressCount) {
     Console.print(F("Error: mastChangePos pos out of range"));
     Console.println(pos);
     return;
@@ -1045,7 +1001,7 @@ void signalMastChangeAspect(int nrSignalMast, byte newAspect) {
   if (signalMastCurrentAspect[nrSignalMast] == newAspect) {
     return;
   }
-  switch (signalMastSignalSet[nrSignalMast]) {
+  switch (signalMastData[nrSignalMast].set) {
     case SIGNAL_SET_CSD_BASIC:
       signalMastChangeAspectCsdBasic(nrSignalMast, newAspect);
       break;

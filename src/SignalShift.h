@@ -27,6 +27,9 @@ const int NUM_SIGNAL_MAST = 16;
 
 const int SEGMENT_SIZE = maxOutputsPerMast + 3;
 
+extern unsigned long currentTime;
+extern unsigned long aspectLag;
+
 #define LON (fixed)
 #define LOFF (fixed | 0x10)
 #define L(n) (n)
@@ -198,9 +201,55 @@ struct MastSettings {
    */
   byte addresses;
 };
-
 static_assert(SEGMENT_SIZE == sizeof(MastSettings), "MastSettings != SEGMEN_SIZE");
 
+class SignalMastData {
+public:
+  SignalSet set : 3;
+  byte addressCount;
+  byte signalCount : 4; // maxOutputsPerMast
+  byte currentAspect : 5; // maxAspects
+  byte lastCode : 5;  // last code set to the signal
+  unsigned int lastTime;  // time the last code was set
+  boolean changed : 1;  // lastCode was set, but not converted to the aspect.
+
+  SignalMastData() : set(SIGNAL_SET_CSD_BASIC), addressCount(0), signalCount(0), currentAspect(0), lastCode(0), lastTime(0), changed(false) {}
+
+  unsigned int maxSignalCount() {
+    return 1 << addressCount;
+  }
+
+  boolean isReadyForProcess() {
+    if (!changed) {
+      return false;
+    }
+    long diff = (currentTime & 0xffff)- lastTime;
+    if (diff < 0) {
+      diff += 0x10000;
+    }
+    if (diff < 0) {
+      // someting really strange happened, the timer rolled around
+      // discard the change.
+      processed();
+      return false;
+    }
+    return (unsigned long)diff > aspectLag;
+  }
+
+  void setCode(byte c) {
+    changed = true;
+    lastCode = c;
+    lastTime = currentTime & 0xffff;
+  }
+
+  void processed() {
+    changed = false;
+    lastTime = 0;
+    lastCode = 0;
+  }
+};
+static_assert(maxOutputsPerMast <= 16,  "Too many signals");
+static_assert(maxAspects <= 32, "Too many aspects");
 
 void signalMastChangeAspect(int nrSignalMast, byte newAspect);
 void signalMastChangeAspect(int progMemOffset, int tableSize, int nrSignalMast, byte newAspect);
@@ -234,7 +283,7 @@ int findNumberOfSignals(int addresses, int mastType);
 byte aspectJmri(int nrSignalMast, byte aspectMx);
 inline byte numberToPhysOutput(byte nrOutput);
 
-extern SignalSet signalMastSignalSet[NUM_SIGNAL_MAST];
+extern SignalMastData signalMastData[NUM_SIGNAL_MAST];
 extern byte signalMastNumberAddress[NUM_SIGNAL_MAST];
 extern byte signalMastNumberSigns[NUM_SIGNAL_MAST];
 

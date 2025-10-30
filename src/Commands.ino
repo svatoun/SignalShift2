@@ -183,8 +183,8 @@ void printMastDef(int nMast) {
     Console.print(cnt); Console.print(':'); 
     Console.println(signalMastNumberSigns[nMast]);
   }
-  if (signalMastSignalSet[nMast] != set || signalMastDefaultAspectIdx[nMast] != defcode) {
-    Console.print(F("  MSS:")); Console.print(signalMastSignalSet[nMast]); Console.print(':'); Console.println(signalMastDefaultAspectIdx[nMast]);
+  if (signalMastData[nMast].set != set || signalMastDefaultAspectIdx[nMast] != defcode) {
+    Console.print(F("  MSS:")); Console.print(signalMastData[nMast].set); Console.print(':'); Console.println(signalMastDefaultAspectIdx[nMast]);
   }
   if (shouldPrintMastOutputs(nMast)) {
     printMastOutputs(nMast, false);
@@ -275,7 +275,7 @@ int findSameAspect(int nMast) {
     return NUM_SIGNAL_MAST + 1;
   }
   for (int i = 0; i < nMast; i++) {
-    if (signalMastNumberAddress[i] != signalMastNumberAddress[nMast]) {
+    if (signalMastData[i].addressCount != signalMastData[nMast].addressCount) {
       continue;
     }
     cv = START_CV_ASPECT_TABLE + (i * maxAspects);
@@ -512,7 +512,7 @@ void commandDefineMast() {
     Dcc.setCV(cvBase + 10, signalSetOrMastType);
     // the default signal
     Dcc.setCV(cvBase + 11, 0);
-    signalMastSignalSet[nMast -1] = SIGNAL_SET_CSD_BASIC;
+    signalMastData[nMast -1].set = SIGNAL_SET_CSD_BASIC;
   } else {
     const struct MastTypeDefinition& def = copySignalMastTypeDefinition(toTemplateIndex(mastType));
     numSignals = def.codeCount;
@@ -534,7 +534,7 @@ void commandDefineMast() {
 
   signalMastNumberSigns[nMast - 1] = numSignals;
   signalMastDefaultAspectIdx[nMast - 1] = defSignal;
-  signalMastNumberAddress[nMast - 1] = bits;
+  signalMastData[nMast - 1].addressCount = bits;
   Console.print(F("Mast #")); Console.print(nMast); Console.print(F(" uses outputs ")); Console.print(firstOut); Console.print(F(" - ")); Console.print(firstOut + numLights);
   Console.print(F(" and ")); Console.print(bits); Console.println(F(" addresses."));
 
@@ -549,7 +549,7 @@ void commandSetSignal() {
   }
   int mastID = nMast - 1;
   int aspect = nextNumber();
-  int maxAspect = 1 << signalMastNumberAddress[mastID];
+  int maxAspect = signalMastData[mastID].maxSignalCount();
   byte newAspect;
 
   if (aspect < 1 || aspect > maxAspect) {
@@ -641,7 +641,7 @@ void commandMastSet() {
   }
   Dcc.setCV(cv + 10, signalSet);
   Dcc.setCV(cv + 11, defaultAspect);
-  ((byte&)signalMastSignalSet[nMast]) = (byte)signalSet;
+  signalMastData[nMast].set = (SignalSet)signalSet;
   signalMastDefaultAspectIdx[nMast] = defaultAspect;
 }
 
@@ -733,7 +733,7 @@ void commandMapAspects() {
   }
   int nMast = definedMast - 1;
   int cur = 0;
-  int limit = 1 << signalMastNumberAddress[nMast];
+  int limit = signalMastData[nMast].maxSignalCount();
   int cvBase = START_CV_ASPECT_TABLE + nMast * maxAspects;
   while (*inputPos) {
     if (*inputPos == ':') {
