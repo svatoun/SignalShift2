@@ -67,11 +67,6 @@ const bool ShiftPWM_invertOutputs = true;
 uint16_t thisDecoderAddress = 100;         // ACCESSORY DECODER ADDRESS
 uint16_t maxDecoderAddress = 0;
 
-//   connect                 A   B   C   D   E   F   G   H   I   J   K   L   M   N   O   P
-//   offset                  0   1   2   3   4   5   6   7   8   9  10  11  12  13  14  15
-//const byte OUTPUT_PIN[] = { 19, 18,  9,  8,  7,  6,  5,  4, 10, 11, 12,  3, 14, 15, 16, 17 };
-//   pins                   A5  A4  D9  D8  D7  D6  D5  D4 D10 D11 D12  D3  A0  A1  A2  A3
-
 const unsigned long BLINKING_TIME_54 = 556;
 const unsigned long BLINKING_TIME_108 = 278;
 const unsigned long BLINKING_TIME_45 = 667;
@@ -80,18 +75,70 @@ const unsigned long BLINKING_TIME_22 = 1333;
 // PENDING: The brightness of LED is perceived non-lineraly by human eye. Revise the scale
 // here according to https://diarmuid.ie/blog/pwm-exponential-led-fading-on-arduino-or-other-platforms
 const byte FADE_TIME_LIGHT[11] = { 6, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66 };
-const int FADE_COUNTER_LIGHT_1[11] = { /* -1 */ 0, 1, 1, 1, 1, 1, 1, 2, 3, 6, 9 };
-const int FADE_COUNTER_LIGHT_2[11] = { /* -1 */ 1, 10, 7, 4, 3, 2, 2, 3, 4, 7, 10 };
+const byte FADE_COUNTER_LIGHT_1[11] = { /* -1 */ 0, 1, 1, 1, 1, 1, 1, 2, 3, 6, 9 };
+const byte FADE_COUNTER_LIGHT_2[11] = { /* -1 */ 1, 10, 7, 4, 3, 2, 2, 3, 4, 7, 10 };
 
 // Will be initialized at startup, and whenever fadeRate global changes. As fadeRate is max 7, the value nicely fits in 9 bits unsigned.
 unsigned int fadeTimeLight[11] = {};
 
+unsigned long currentTime;
+/**
+ * Time threshold before code is considered not confirmed as an aspect. If mast's code changes, this time must elapse before the code
+ * is converted into an aspect.
+ */
+unsigned long aspectLag;
+
+class SignalMastData {
+public:
+  SignalSet set : 3;
+  byte addrOffset;
+  byte signalCount : 4; // maxOutputsPerMast
+  byte currentAspect : 5; // maxAspects
+  byte lastCode : 5;  // last code set to the signal
+  unsigned int lastTime;  // time the last code was set
+  boolean changed : 1;  // lastCode was set, but not converted to the aspect.
+
+  SignalMastData() : set(SIGNAL_SET_CSD_BASIC), addrOffset(0), signalCount(0), currentAspect(0), lastCode(0), lastTime(0), changed(false) {}
+
+  boolean isReadyForProcess() {
+    if (!changed) {
+      return false;
+    }
+    long diff = (currentTime & 0xffff)- lastTime;
+    if (diff < 0) {
+      diff += 0x10000;
+    }
+    if (diff < 0) {
+      changed = false;
+      return false;
+    }
+    return (unsigned long)diff > aspectLag;
+  }
+
+  void setCode(byte c) {
+    changed = true;
+    lastCode = c;
+    lastTime = currentTime & 0xffff;
+  }
+
+  void processed() {
+    changed = false;
+    lastTime = 0;
+    lastCode = 0;
+  }
+};
+
+static_assert(maxOutputsPerMast <= 16,  "Too many signals");
+static_assert(maxAspects <= 32, "Too many aspects");
+
 SignalSet signalMastSignalSet[NUM_SIGNAL_MAST] = { SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC, SIGNAL_SET_SZDC_BASIC };  // signal set
 
 byte signalMastNumberAddress[NUM_SIGNAL_MAST] = { 1, 1, 1, 1, 1, 1, 1, 1 };  // number of address
+// probably useless, seems to be used only during configuration and can be computed
 byte signalMastNumberSigns[NUM_SIGNAL_MAST] = { };  // number of signals
 
 byte signalMastCurrentAspect[NUM_SIGNAL_MAST] = { 255, 255, 255, 255, 255, 255, 255, 255 };
+// Used only during initialization; possibly discard.
 byte signalMastDefaultAspectIdx[NUM_SIGNAL_MAST] = { 255, 255, 255, 255, 255, 255, 255, 255 };
 
 LightFunction bublState2[NUM_OUTPUTS + 8] = {};
@@ -99,7 +146,7 @@ LightFunction bublState2[NUM_OUTPUTS + 8] = {};
 unsigned int lightStartTimeBubl[NUM_OUTPUTS + 8] = {};
 
 byte signalMastLastCode[NUM_SIGNAL_MAST] = { 255, 255, 255, 255, 255, 255, 255, 255 };                // last code
-unsigned long signalMastLastTime[NUM_SIGNAL_MAST] = {};                                               // last time
+unsigned int signalMastLastTime[NUM_SIGNAL_MAST] = {};                                               // last time
 boolean signalMastCodeChanged[NUM_SIGNAL_MAST] = { true, true, true, true, true, true, true, true };  // code changed
 byte overrides[(NUM_OUTPUTS + 7) / 8] = { false };
 
@@ -107,8 +154,6 @@ boolean reinitializeLocalVariables = true;
 
 int counterNrOutput = 0;
 int counterNrSignalMast = 0;
-unsigned long currentTime;
-unsigned long aspectLag;
 
 
 NmraDcc Dcc;
@@ -729,7 +774,7 @@ void initLocalVariablesSignalMast() {
 
   for (int i = 0; i < numSignalNumber; i++) {
     signalMastLastCode[i] = signalMastDefaultAspectIdx[i];
-    signalMastLastTime[i] = currentTime;
+    signalMastLastTime[i] = currentTime & 0xffff;
     signalMastCodeChanged[i] = true;
   }
 }
@@ -931,7 +976,7 @@ void signalMastChangePos(int nrSignalMast, uint16_t pos, uint8_t Direction) {
       bitWrite(newAspectIdx, pos, Direction);
       break;
   }
-  newAspectIdx = newAspectIdx & 0x1f;
+  newAspectIdx = newAspectIdx & (maxAspects - 1);
   // Console.print(F("mast: ")); Console.print(nrSignalMast); Console.print(F(" type:")); Console.print(type, HEX); Console.print(F(" pos: ")); Console.print(pos); Console.print(F(" dir:")); Console.println(Direction);
   // Console.print(F("new aspect: ")); Console.println(newAspectIdx);
 
@@ -959,9 +1004,15 @@ void processAspectCode(int nrSignalMast) {
     return;
   }
 
-  unsigned long aspectCodeElapsedTime = currentTime - signalMastLastTime[nrSignalMast];
+  long aspectCodeElapsedTime = (currentTime & 0xffff) - signalMastLastTime[nrSignalMast];
+  if (aspectCodeElapsedTime < 0) {
+    aspectCodeElapsedTime += 0x10000;
+  }
+  if (aspectCodeElapsedTime < 0) {
+    return;
+  }
 
-  if (aspectCodeElapsedTime < aspectLag) {
+  if ((unsigned long)aspectCodeElapsedTime < aspectLag) {
     return;
   }
 

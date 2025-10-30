@@ -82,6 +82,18 @@ struct LightFunction {
   LightFunction(const LightFunction& f) {
     *((byte*)(void*)this) = *((byte*)(void*)&f);
   }
+
+  inline boolean isFinished() {
+    return end;
+  }
+
+  inline boolean towardsOn() {
+    return !off;
+  }
+
+  inline boolean towardsOff() {
+    return off;
+  }
 };
 
 // Signal sets defined in the decoder
