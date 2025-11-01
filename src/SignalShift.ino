@@ -90,20 +90,10 @@ unsigned long aspectLag;
 
 SignalMastData signalMastData[NUM_SIGNAL_MAST];
 
-// probably useless, seems to be used only during configuration and can be computed
-byte signalMastNumberSigns[NUM_SIGNAL_MAST] = { };  // number of signals
-
-byte signalMastCurrentAspect[NUM_SIGNAL_MAST] = { 255, 255, 255, 255, 255, 255, 255, 255 };
-// Used only during initialization; possibly discard.
-byte signalMastDefaultAspectIdx[NUM_SIGNAL_MAST] = { 255, 255, 255, 255, 255, 255, 255, 255 };
-
 LightFunction bublState2[NUM_OUTPUTS + 8] = {};
 
 unsigned int lightStartTimeBubl[NUM_OUTPUTS + 8] = {};
 
-byte signalMastLastCode[NUM_SIGNAL_MAST] = { 255, 255, 255, 255, 255, 255, 255, 255 };                // last code
-unsigned int signalMastLastTime[NUM_SIGNAL_MAST] = {};                                               // last time
-boolean signalMastCodeChanged[NUM_SIGNAL_MAST] = { true, true, true, true, true, true, true, true };  // code changed
 byte overrides[(NUM_OUTPUTS + 7) / 8] = { false };
 
 boolean reinitializeLocalVariables = true;
@@ -195,10 +185,10 @@ void setupShiftPWM() {
  */
 void loop() {
   maybeInitLocalVariables();
-  processTerminal();
   currentTime = millis();
-
   Dcc.process();
+
+  processTerminal();
 
   processAspectCode(counterNrSignalMast);
   counterNrSignalMast++;
@@ -231,7 +221,7 @@ int findSignalIndex(int address, int& position) {
 }
 
 void notifyDccAccTurnoutOutput(uint16_t Addr, uint8_t Direction, uint8_t OutputPower) {
-  Console.println("DCC turnout");
+  // Console.println("DCC turnout");
   if (rocoAddress) {
     Addr = Addr + 4;
   }
@@ -705,12 +695,12 @@ void initLocalVariablesSignalMast() {
     byte defaultAspectIdx = Dcc.getCV(counter);
     counter++;
 
-    signalMastDefaultAspectIdx[i] = defaultAspectIdx;
+    signalMastData[i].defaultAspect = defaultAspectIdx;
     signalMastData[i].addressCount = Dcc.getCV(counter);
     // Console.print(F("Addresses: ")); Console.println(signalMastNumberAddress[i]);
     counter++;
 
-    signalMastNumberSigns[i] = findNumberOfSignals(signalMastData[i].addressCount, mastTypeOrSignalSet);
+    signalMastData[i].signalCount = findNumberOfSignals(signalMastData[i].addressCount, mastTypeOrSignalSet);
 
     for (int i = 0; i < NUM_OUTPUTS; i++) {
       boolean used = bitRead(usedOutputs[i / 8], i % 8);
@@ -729,9 +719,7 @@ void initLocalVariablesSignalMast() {
   // Console.print(F("Max address: ")); Console.println(maxDecoderAddress);
 
   for (int i = 0; i < numSignalNumber; i++) {
-    signalMastLastCode[i] = signalMastDefaultAspectIdx[i];
-    signalMastLastTime[i] = currentTime & 0xffff;
-    signalMastCodeChanged[i] = true;
+    signalMastData[i].setCode(signalMastData[i].defaultAspect);
   }
 }
 
@@ -911,7 +899,8 @@ void signalMastChangePos(int nrSignalMast, uint16_t pos, uint8_t Direction) {
     return;
   }
   
-  byte newAspectIdx = signalMastLastCode[nrSignalMast];
+  byte oldAspectIdx = signalMastData[nrSignalMast].getLastCode();
+  byte newAspectIdx = oldAspectIdx;
   // Console.print("existing aspect: "); Console.println(newAspectIdx);
   byte type = getMastTypeOrSignalSet(nrSignalMast);
   switch (type & signalSetControlType) {
@@ -936,7 +925,7 @@ void signalMastChangePos(int nrSignalMast, uint16_t pos, uint8_t Direction) {
   // Console.print(F("mast: ")); Console.print(nrSignalMast); Console.print(F(" type:")); Console.print(type, HEX); Console.print(F(" pos: ")); Console.print(pos); Console.print(F(" dir:")); Console.println(Direction);
   // Console.print(F("new aspect: ")); Console.println(newAspectIdx);
 
-  if (signalMastLastCode[nrSignalMast] == newAspectIdx) {
+  if (oldAspectIdx == newAspectIdx) {
     return;
   }
 
@@ -945,37 +934,20 @@ void signalMastChangePos(int nrSignalMast, uint16_t pos, uint8_t Direction) {
     Console.println(newAspectIdx);
     return;
   }
-
-  signalMastLastCode[nrSignalMast] = newAspectIdx;
-  signalMastLastTime[nrSignalMast] = currentTime;
-  signalMastCodeChanged[nrSignalMast] = true;
+  signalMastData[nrSignalMast].setCode(newAspectIdx);
 }
 
 /**********************************************************************************
  *
  */
 void processAspectCode(int nrSignalMast) {
-
-  if (!signalMastCodeChanged[nrSignalMast]) {
+  if (!signalMastData[nrSignalMast].isReadyForProcess()) {
     return;
   }
 
-  long aspectCodeElapsedTime = (currentTime & 0xffff) - signalMastLastTime[nrSignalMast];
-  if (aspectCodeElapsedTime < 0) {
-    aspectCodeElapsedTime += 0x10000;
-  }
-  if (aspectCodeElapsedTime < 0) {
-    return;
-  }
-
-  if ((unsigned long)aspectCodeElapsedTime < aspectLag) {
-    return;
-  }
-
-  byte newCode = signalMastLastCode[nrSignalMast];
+  byte newCode = signalMastData[nrSignalMast].processed();
   byte newAspect = aspectJmri(nrSignalMast, newCode);
   signalMastChangeAspect(nrSignalMast, newAspect);
-  signalMastCodeChanged[nrSignalMast] = false;
 }
 
 void signalMastChangeAspectCsdBasic(int nrSignalMast, byte newAspect);
@@ -988,17 +960,18 @@ void signalMastChangeAspectSzdcBasic(int nrSignalMast, byte newAspect);
  *
  */
 void signalMastChangeAspect(int nrSignalMast, byte newAspect) {
+  // diagnostics: light up everything.
   if (newAspect == 255) {
     signalMastChangeAspectCsdBasic(nrSignalMast, 26);
     return;
   }
   if (newAspect > maxAspects || newAspect == 0) {
-    // all off
+    // aspect is invalid, or undefined all off
     signalMastChangeAspectCsdMechanical(nrSignalMast, 1);
     return;
   }
   newAspect--;
-  if (signalMastCurrentAspect[nrSignalMast] == newAspect) {
+  if (signalMastData[nrSignalMast].currentAspect == newAspect) {
     return;
   }
   switch (signalMastData[nrSignalMast].set) {
@@ -1043,7 +1016,7 @@ void signalMastChangeAspect(int progMemOffset, int tableSize, int nrSignalMast, 
     Console.println(newAspect);
     return;
   }
-  signalMastCurrentAspect[nrSignalMast] = newAspect;
+  signalMastData[nrSignalMast].currentAspect = newAspect;
 
   // Configuration of light outputs
   LightFunction buffer[maxOutputsPerMast];

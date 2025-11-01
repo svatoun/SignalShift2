@@ -181,10 +181,12 @@ void printMastDef(int nMast) {
   }
   if (!codes) {
     Console.print(cnt); Console.print(':'); 
-    Console.println(signalMastNumberSigns[nMast]);
+    Console.println(signalMastData[nMast].signalCount);
   }
-  if (signalMastData[nMast].set != set || signalMastDefaultAspectIdx[nMast] != defcode) {
-    Console.print(F("  MSS:")); Console.print(signalMastData[nMast].set); Console.print(':'); Console.println(signalMastDefaultAspectIdx[nMast]);
+  byte mastSet = signalMastData[nMast].set;
+  byte mastDefault = signalMastData[nMast].defaultAspect;
+  if (mastSet != set || mastDefault != defcode) {
+    Console.print(F("  MSS:")); Console.print(mastSet); Console.print(':'); Console.println(mastDefault);
   }
   if (shouldPrintMastOutputs(nMast)) {
     printMastOutputs(nMast, false);
@@ -437,7 +439,8 @@ void commandDefineMast() {
   int signalSetOrMastType = mode | SIGNAL_SET_CSD_BASIC;
   int defSignal = 0;
   int bits = 0;
-  int cvBase = START_CV_OUTPUT + (nMast - 1) * SEGMENT_SIZE;
+  int mastIdx = nMast - 1;
+  int cvBase = START_CV_OUTPUT + (mastIdx) * SEGMENT_SIZE;
   
   if (*inputPos == '+') {
     const char *s = ++inputPos;
@@ -512,7 +515,7 @@ void commandDefineMast() {
     Dcc.setCV(cvBase + 10, signalSetOrMastType);
     // the default signal
     Dcc.setCV(cvBase + 11, 0);
-    signalMastData[nMast -1].set = SIGNAL_SET_CSD_BASIC;
+    signalMastData[mastIdx].set = SIGNAL_SET_CSD_BASIC;
   } else {
     const struct MastTypeDefinition& def = copySignalMastTypeDefinition(toTemplateIndex(mastType));
     numSignals = def.codeCount;
@@ -521,10 +524,11 @@ void commandDefineMast() {
     Console.print("Copying from template ");
     Console.println(toTemplateIndex(mastType));
     Console.print("signals: "); Console.print(numSignals); Console.print(" lights: "); Console.print(numLights); Console.print(" default: "); Console.println(defSignal);
-    saveTemplateOutputsToCVs(def, (nMast - 1), firstOut);
-    saveTemplateAspectsToCVs(nMast - 1, mastType);
+    saveTemplateOutputsToCVs(def, mastIdx, firstOut);
+    saveTemplateAspectsToCVs(mastIdx, mastType);
       // the signal set number
     Dcc.setCV(cvBase + 10, mastType & 0xff);
+    signalMastData[mastIdx].set = def.signalSet;
   }
   
   bits = findRequiredAddrCount(numSignals, mode);
@@ -532,9 +536,9 @@ void commandDefineMast() {
   Console.print("Wrote to CV #"); Console.println(cvBase + 12, HEX);
   Dcc.setCV(cvBase + 12, bits);
 
-  signalMastNumberSigns[nMast - 1] = numSignals;
-  signalMastDefaultAspectIdx[nMast - 1] = defSignal;
-  signalMastData[nMast - 1].addressCount = bits;
+  signalMastData[mastIdx].signalCount = numSignals;
+  signalMastData[mastIdx].defaultAspect = defSignal;
+  signalMastData[mastIdx].addressCount = bits;
   Console.print(F("Mast #")); Console.print(nMast); Console.print(F(" uses outputs ")); Console.print(firstOut); Console.print(F(" - ")); Console.print(firstOut + numLights);
   Console.print(F(" and ")); Console.print(bits); Console.println(F(" addresses."));
 
@@ -642,7 +646,7 @@ void commandMastSet() {
   Dcc.setCV(cv + 10, signalSet);
   Dcc.setCV(cv + 11, defaultAspect);
   signalMastData[nMast].set = (SignalSet)signalSet;
-  signalMastDefaultAspectIdx[nMast] = defaultAspect;
+  signalMastData[nMast].defaultAspect = defaultAspect;
 }
 
 extern int inputDelim;

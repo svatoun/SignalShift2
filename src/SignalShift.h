@@ -205,15 +205,16 @@ static_assert(SEGMENT_SIZE == sizeof(MastSettings), "MastSettings != SEGMEN_SIZE
 
 class SignalMastData {
 public:
+  boolean changed : 1;  // lastCode was set, but not converted to the aspect.
   SignalSet set : 3;
-  byte addressCount;
-  byte signalCount : 4; // maxOutputsPerMast
-  byte currentAspect : 5; // maxAspects
+  byte addressCount : 3;
+  byte signalCount : 4; // 0..maxOutputsPerMast
+  byte currentAspect : 5; // 0..maxAspects
   byte lastCode : 5;  // last code set to the signal
   unsigned int lastTime;  // time the last code was set
-  boolean changed : 1;  // lastCode was set, but not converted to the aspect.
-
-  SignalMastData() : set(SIGNAL_SET_CSD_BASIC), addressCount(0), signalCount(0), currentAspect(0), lastCode(0), lastTime(0), changed(false) {}
+  byte defaultAspect;
+ 
+  SignalMastData() : changed(false), set(SIGNAL_SET_CSD_BASIC), addressCount(0), signalCount(0), currentAspect(0), lastCode(0), lastTime(0), defaultAspect(255) {}
 
   unsigned int maxSignalCount() {
     return 1 << addressCount;
@@ -242,10 +243,16 @@ public:
     lastTime = currentTime & 0xffff;
   }
 
-  void processed() {
+  byte processed() {
+    byte save = lastCode;
     changed = false;
     lastTime = 0;
     lastCode = 0;
+    return save;
+  }
+
+  byte getLastCode() {
+    return lastCode;
   }
 };
 static_assert(maxOutputsPerMast <= 16,  "Too many signals");
@@ -284,11 +291,6 @@ byte aspectJmri(int nrSignalMast, byte aspectMx);
 inline byte numberToPhysOutput(byte nrOutput);
 
 extern SignalMastData signalMastData[NUM_SIGNAL_MAST];
-extern byte signalMastNumberAddress[NUM_SIGNAL_MAST];
-extern byte signalMastNumberSigns[NUM_SIGNAL_MAST];
-
-extern byte signalMastCurrentAspect[NUM_SIGNAL_MAST];
-extern byte signalMastDefaultAspectIdx[NUM_SIGNAL_MAST];
 extern byte overrides[(NUM_OUTPUTS + 7) / 8];
 
 
