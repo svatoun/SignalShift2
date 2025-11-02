@@ -28,7 +28,7 @@ const int NUM_SIGNAL_MAST = 16;
 const int SEGMENT_SIZE = maxOutputsPerMast + 3;
 
 extern unsigned long currentTime;
-extern unsigned long aspectLag;
+extern unsigned int aspectLag;
 
 #define LON (fixed)
 #define LOFF (fixed | 0x10)
@@ -292,7 +292,8 @@ int findRequiredAddrCount(int codes, int mastType);
 int findNumberOfSignals(int addresses, int mastType);
 byte aspectJmri(int nrSignalMast, byte aspectMx);
 inline byte numberToPhysOutput(byte nrOutput);
-
+byte getMastOutput(byte nMast, byte light);
+LightFunction getBulbState(byte n);
 SignalMastData& signalData(byte mast);
 
 #endif

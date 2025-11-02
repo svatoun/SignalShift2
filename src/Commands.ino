@@ -18,7 +18,6 @@ int definedMast = -1;
 
 void commandClear() {
   setFactoryDefault();
-  commandSave();
   commandReset();
 }
 
@@ -48,10 +47,15 @@ void dumpAllMasts() {
 boolean isMastActive(int nMast) {
   int cvBase = sizeof(MastSettings) * nMast + START_CV_OUTPUT;
   for (int i = 0; i < maxOutputsPerMast; i++) {
+    if (getMastOutput(nMast, i) != ONA) {
+      return true;
+    }
+    /*
     int o = Dcc.getCV(cvBase + i); 
     if ((o != ONA) && (o < NUM_OUTPUTS + 1)) {
       return true;
     }
+    */
   }
   return false;
 }
@@ -106,8 +110,9 @@ void printMastDef(int nMast) {
   
   int cvBase = sizeof(MastSettings) * nMast + START_CV_OUTPUT;
   for (int i = 0; i < maxOutputsPerMast; i++) {
-    int o = Dcc.getCV(cvBase + i); 
-    if ((o != ONA) && (o < NUM_OUTPUTS + 1)) {
+    // int o = Dcc.getCV(cvBase + i); 
+    int o = getMastOutput(nMast, i);
+    if (o != ONA) {
       // Console.print("output "); Console.print(i); Console.print(" = "); Console.println(o);
       if (o < first) {
         first = o;
@@ -204,8 +209,8 @@ void printMastOutputs(int nMast, boolean suppressFull) {
 
   int cvBase = sizeof(MastSettings) * nMast + START_CV_OUTPUT;
   for (int i = 0; i < maxOutputsPerMast; i++) {
-    lights[i] = Dcc.getCV(cvBase + i); 
-    if (lights[i] != ONA && lights[i] <= NUM_OUTPUTS) {
+    lights[i] = getMastOutput(nMast, i); 
+    if (lights[i] != ONA) {
       cnt++;
     }
   }
@@ -848,12 +853,55 @@ void commandOverride() {
   }
 }
 
-void commandInf() {
+extern uint8_t numSignalNumber;
 
-}
+const char signChars[] = { '.', '+', '5', '1', '4', '2'};
+static_assert(sizeof(signChars) == LightSign::_lightsign_last);
 
-void commandSave() {
-  
+void commandState() {
+  int mast = nextNumber();
+  int start;
+  int end;
+
+  if (mast > 0) {
+    if (mast > numSignalNumber) {
+      Console.println(msg_InvalidMastID);
+      return;
+    }
+    start = end = mast - 1;
+  } else {
+    start = 0;
+    end = numSignalNumber - 1;
+  }
+  for (byte n = start; n <= end; n++) {
+    if (!isMastActive(n)) {
+      continue;
+    }
+    byte dashes = 0;
+    Console.print(F("Mast #")); Console.print(n + 1); Console.print(": ");
+    for (byte l = 0; l < maxOutputsPerMast; l++) {
+      byte out = getMastOutput(n, l);
+      if (out == ONA) {
+        dashes++;
+        continue;
+      }
+
+      LightFunction fn = getBulbState(out);
+      byte sign = fn.sign;
+      char c;
+      if (sign == LightSign::fixed) {
+        c = fn.off ? '-' : '+';
+      } else {
+        c = signChars[sign];
+      }
+      while (dashes) {
+        Console.print('.');
+        dashes--;
+      }
+      Console.print(c);
+    }
+    Console.println();
+  }
 }
 
 void commandAddress() {
@@ -914,6 +962,7 @@ boolean handleSignals(ModuleCmd cmd) {
       registerLineCommand("OVR", &commandOverride);
       registerLineCommand("ADR", &commandAddress);
       registerLineCommand("TNT", &commandDccTurnout);
+      registerLineCommand("STA", &commandState);
       break;
     default:
       break;

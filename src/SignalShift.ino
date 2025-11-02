@@ -87,7 +87,7 @@ unsigned long currentTime;
  * Time threshold before code is considered not confirmed as an aspect. If mast's code changes, this time must elapse before the code
  * is converted into an aspect.
  */
-unsigned long aspectLag;
+unsigned int aspectLag;
 
 SignalMastData signalMastData[NUM_SIGNAL_MAST];
 
@@ -98,6 +98,7 @@ unsigned int lightStartTimeBubl[NUM_OUTPUTS + 8] = {};
 byte overrides[(NUM_OUTPUTS + 7) / 8] = { false };
 
 boolean reinitializeLocalVariables = true;
+boolean aspectsInitialized = false;
 
 int counterNrOutput = 0;
 int counterNrSignalMast = 0;
@@ -170,6 +171,7 @@ void setup() {
 
   initTerminal();
   setupTerminal();
+  maybeInitLocalVariables();
 }
 
 void setupShiftPWM() {
@@ -199,7 +201,9 @@ void loop() {
   processAspectCode(counterNrSignalMast);
   counterNrSignalMast++;
   if (counterNrSignalMast >= numSignalNumber) {
+    // Console.print("current mast ="); Console.print(counterNrSignalMast); Console.print(" numSignalNumber = "); Console.println(numSignalNumber);
     counterNrSignalMast = 0;
+    aspectsInitialized = true;
   }
 
   processOutputLight(counterNrOutput);
@@ -211,6 +215,22 @@ void loop() {
 
 SignalMastData& signalData(byte no) {
   return signalMastData[no];
+}
+
+byte getMastOutput(byte nMast, byte light) {
+  if (nMast >= numSignalNumber) {
+    return ONA;
+  }
+  if (light >= maxOutputsPerMast) {
+    return ONA;
+  }
+  int cvBase = sizeof(MastSettings) * nMast + START_CV_OUTPUT;
+  byte o = Dcc.getCV(cvBase + light);
+  if (o > NUM_OUTPUTS) {
+    return ONA;
+  } else {
+    return o;
+  }
 }
 
 /**************************************************************************
@@ -282,11 +302,11 @@ const CVPair FactoryDefaultCVs[] = {
 
 const MastSettings factorySignalMastOutputs[] PROGMEM = {
   { { 1, 2, 3, 4, 5 }, 1 + (usesCodes | turnoutControl), 0, 0 },    // signal mast 0
-  { { 0, 6, 7, 8, 9 },     (usesCodes | turnoutControl), 0, 0 },    // signal mast 1
-  { { 0, 10, 11, 12, 13 }, (usesCodes | turnoutControl), 0, 0 },    // signal mast 2
-  { { 0, 14, 15, 16, 17 }, (usesCodes | turnoutControl), 0, 0 },    // signal mast 3
-  { { 0, 18, 19, 20, 21 }, (usesCodes | turnoutControl), 0, 0 },    // signal mast 4
-  { { 0, 22, 23, 24, 25 }, (usesCodes | turnoutControl), 0, 0 },    // signal mast 5
+//  { { 0, 6, 7, 8, 9 },     (usesCodes | turnoutControl), 0, 0 },    // signal mast 1
+//  { { 0, 10, 11, 12, 13 }, (usesCodes | turnoutControl), 0, 0 },    // signal mast 2
+//  { { 0, 14, 15, 16, 17 }, (usesCodes | turnoutControl), 0, 0 },    // signal mast 3
+//  { { 0, 18, 19, 20, 21 }, (usesCodes | turnoutControl), 0, 0 },    // signal mast 4
+//  { { 0, 22, 23, 24, 25 }, (usesCodes | turnoutControl), 0, 0 },    // signal mast 5
 };
 
 const uint8_t noSignalMastOutputs[] PROGMEM = {
@@ -594,14 +614,14 @@ __attribute__((noinline)) int reassignMastOutputs(int mastIndex, int from, boole
 int reassignMastOutputs2(int mastIndex, int from) {
   int cvIndex = (sizeof(MastSettings) * mastIndex) + START_CV_OUTPUT;
   int minLightNumber = findMinLightIndex(mastIndex);
-
+  
   int lastOutput = -1;
 
   // Console.print(F("Reassigning outputs for ")); Console.print(mastIndex); Console.print(F(" start from ")); Console.println(from);
 
   for (unsigned int i = 0; i < sizeof(MastSettings::outputs); i++) {
-    byte n = Dcc.getCV(cvIndex);
-    if (n > 0 && n != ONA && n <= NUM_OUTPUTS) {
+    byte n = getMastOutput(mastIndex, i);
+    if (n != ONA) {
       n = (n - minLightNumber) + from;
       Dcc.setCV(cvIndex, n);
       lastOutput = n;
@@ -727,7 +747,12 @@ void initLocalVariablesSignalMast() {
 unsigned int timeElapsedForBulb(byte nrOutput) {
   unsigned int start = (lightStartTimeBubl[nrOutput] & 0xffff);
   if (start == 0) {
-    return UINT16_MAX;
+    if (aspectsInitialized) {
+      return UINT16_MAX;
+    } else {
+      // special case for bootstrap: pretend fade in/out time elapsed.
+      return fadeTimeLight[(sizeof(fadeTimeLight) / sizeof(fadeTimeLight[0]))- 1] + 20;
+    }
   }
   unsigned int cur = currentTime & 0xffff;
   int span;
@@ -798,18 +823,30 @@ void changeLightState2(byte lightOutput, struct LightFunction newState) {
     }
   }
 
-  resetStartTime(lightOutput);
+  if (aspectsInitialized) {
+    resetStartTime(lightOutput);
+  } else {
+    lightStartTimeBubl[lightOutput] = 0;
+  }
   bs = newState;
   if (newState.sign != fixed) {
     bs.off = !wasOff;
   }
   if (debugLights) {
-    Console.print(F("Change light #"));
+    Console.print(F("*set light #"));
     Console.print(lightOutput);
     Console.print(F(" newState: "));
     Console.print(bublState2[lightOutput].sign);
     Console.print(F(", off = "));
     Console.println(bublState2[lightOutput].off);
+  }
+}
+
+LightFunction getBulbState(byte n) {
+  if (n == 0 || n > NUM_OUTPUTS) {
+    return (LightFunction)0;
+  } else {
+    return bublState2[n - 1];
   }
 }
 
@@ -942,7 +979,7 @@ void signalMastChangePos(int nrSignalMast, uint16_t pos, uint8_t Direction) {
  */
 void processAspectCode(int nrSignalMast) {
   SignalMastData& data = signalData(nrSignalMast);
-  if (!data.isReadyForProcess()) {
+  if (aspectsInitialized && !data.isReadyForProcess()) {
     return;
   }
 
@@ -978,7 +1015,7 @@ void signalMastChangeAspect(SignalMastData& data, int nrSignalMast, byte newAspe
     return;
   }
   newAspect--;
-  if (data.currentAspect == newAspect) {
+  if (aspectsInitialized && (data.currentAspect == newAspect)) {
     return;
   }
   const byte set = data.set;
