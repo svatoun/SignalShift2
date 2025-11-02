@@ -512,22 +512,22 @@ static_assert(((sizeof(mastTypeDefinitions) + sizeof(mastTypeDefinitions[0]) -1)
 const byte mastTypeDefinitionCount = ((sizeof(mastTypeDefinitions) + sizeof(mastTypeDefinitions[0]) -1) / sizeof(mastTypeDefinitions[0]));
 
 
-void signalMastChangeAspectCsdBasic(int nrSignalMast, byte newAspect) {
-  signalMastChangeAspect((int)&(csdBasicAspects[newAspect]), sizeof(csdBasicAspects) / sizeof(csdBasicAspects[0]), nrSignalMast, newAspect);
+void signalMastChangeAspectCsdBasic(SignalMastData& data, int nrSignalMast, byte newAspect) {
+  signalMastChangeAspect((int)&(csdBasicAspects[newAspect]), sizeof(csdBasicAspects) / sizeof(csdBasicAspects[0]), nrSignalMast, data, newAspect);
 }
 
-void signalMastChangeAspectCsdIntermediate(int nrSignalMast, byte newAspect) {
-  signalMastChangeAspect((int)&(csdIntermediateAspects[newAspect]), sizeof(csdBasicAspects) / sizeof(csdBasicAspects[0]), nrSignalMast, newAspect);
+void signalMastChangeAspectCsdIntermediate(SignalMastData& data, int nrSignalMast, byte newAspect) {
+  signalMastChangeAspect((int)&(csdIntermediateAspects[newAspect]), sizeof(csdBasicAspects) / sizeof(csdBasicAspects[0]), nrSignalMast, data, newAspect);
 }
 
-void signalMastChangeAspectCsdEmbedded(int nrSignalMast, byte newAspect) {
-  signalMastChangeAspect((int)&(csdEmbeddedAspects[newAspect]), sizeof(csdBasicAspects) / sizeof(csdBasicAspects[0]), nrSignalMast, newAspect);
+void signalMastChangeAspectCsdEmbedded(SignalMastData& data, int nrSignalMast, byte newAspect) {
+  signalMastChangeAspect((int)&(csdEmbeddedAspects[newAspect]), sizeof(csdBasicAspects) / sizeof(csdBasicAspects[0]), nrSignalMast, data, newAspect);
 }
 
-void signalMastChangeAspectSzdcBasic(int nrSignalMast, byte newAspect) {
-  signalMastChangeAspect((int)&(szdcBasicAspects[newAspect]), sizeof(csdBasicAspects) / sizeof(csdBasicAspects[0]), nrSignalMast, newAspect);
+void signalMastChangeAspectSzdcBasic(SignalMastData& data, int nrSignalMast, byte newAspect) {
+  signalMastChangeAspect((int)&(szdcBasicAspects[newAspect]), sizeof(csdBasicAspects) / sizeof(csdBasicAspects[0]), nrSignalMast, data, newAspect);
 }
 
-void signalMastChangeAspectCsdMechanical(int nrSignalMast, byte newAspect) {
-  signalMastChangeAspect((int)&(csdMechanicalAspects[newAspect]), sizeof(csdBasicAspects) / sizeof(csdBasicAspects[0]), nrSignalMast, newAspect);
+void signalMastChangeAspectCsdMechanical(SignalMastData& data, int nrSignalMast, byte newAspect) {
+  signalMastChangeAspect((int)&(csdMechanicalAspects[newAspect]), sizeof(csdBasicAspects) / sizeof(csdBasicAspects[0]), nrSignalMast, data, newAspect);
 }

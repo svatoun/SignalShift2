@@ -5,6 +5,7 @@
 #include "SignalShift.h"
 #include "Terminal.h"
 #include "DecoderEnv.h"
+#include "messages.h"
 
 boolean handleSignals(ModuleCmd cmd);
 ModuleChain signals("signals", 0, &handleSignals);
@@ -24,7 +25,7 @@ void commandClear() {
 void commandPrintMastDef() {
   int nMast = nextNumber();
   if (nMast < 1 || nMast > NUM_SIGNAL_MAST) {
-    Console.println(F("Invalid mast ID"));
+    Console.println(msg_InvalidMastID);
     return;
   }
   printMastDef(nMast - 1);
@@ -300,8 +301,8 @@ void printAspectMap(int nMast) {
   byte mastTypeOrSignalSet = Dcc.getCV(cvBase + maxOutputsPerMast);
   int addresses = Dcc.getCV(cvBase + maxOutputsPerMast + 2);
   int limit = findNumberOfSignals(addresses, mastTypeOrSignalSet);
-  Console.print("type = "); Console.println(mastTypeOrSignalSet);
-  Console.print("Limit = "); Console.println(limit);
+  // Console.print("type = "); Console.println(mastTypeOrSignalSet);
+  // Console.print("Limit = "); Console.println(limit);
   int copyOf = findSameAspect(nMast);
   if (copyOf >= 0) {
     if (copyOf >= NUM_SIGNAL_MAST) {
@@ -374,10 +375,10 @@ void printAspectMap(int nMast) {
 
 void commandEnd() {
   if (definedMast < 0) {
-    Console.println(F("No open definition."));
+    Console.println(msg_MastNotNotOpened);
     return;
   } else {
-    Console.print(F("Mast #")); Console.print(definedMast); Console.println(F(" definition closed."));
+    Console.print(F("Mast #")); Console.print(definedMast); Console.println(F(" closed."));
     definedMast = -1;
   }
 }
@@ -389,7 +390,7 @@ void commandEnd() {
 void commandDefineMast() {
   int nMast = nextNumber();
   if (nMast < 1 || nMast > NUM_SIGNAL_MAST) {
-    Console.println(F("Invalid mast ID"));
+    Console.println(msg_InvalidMastID);
     return;
   }
 
@@ -400,7 +401,7 @@ void commandDefineMast() {
     return;
   }
   if (firstOut < 1 || firstOut > NUM_OUTPUTS) {
-    Console.println(F("Invalid output ID"));
+    Console.println(msg_InvalidOutput);
     return;
   }
 
@@ -454,7 +455,7 @@ void commandDefineMast() {
       next = e;
     }
     // mast type from template
-    Console.print("Trying to match: "); Console.println(s);
+    // Console.print("Trying to match: "); Console.println(s);
     char buffer[10];
     for (int i = 0; i < 32; i++) {
       int idx = (int)&(mastTypeNames[i]);
@@ -473,7 +474,7 @@ void commandDefineMast() {
 
       if (strcmp(buffer, s) == 0) {
         mastType = usesCodes | mode | id;
-        Console.print("Found id: "); Console.print(id); Console.print(" mode "); Console.println(mode);
+        // Console.print("Found id: "); Console.print(id); Console.print(" mode "); Console.println(mode);
         break;
       }
     }
@@ -481,7 +482,7 @@ void commandDefineMast() {
       mastType = nextNumber();
     }
     if (mastType < 0) {
-      Console.println("Invalid mast type");
+      Console.println("Bad mast type");
       return;
     }
     inputPos = next;
@@ -490,7 +491,7 @@ void commandDefineMast() {
   if (mastType < 0) {
     numLights = nextNumber();
     if (numLights < 1 || (firstOut + numLights > NUM_OUTPUTS) || numLights > maxOutputsPerMast) {
-      Console.println(F("Invalid number of lights"));
+      Console.println(F("Bad # of lights"));
       return;
     }
 
@@ -500,7 +501,7 @@ void commandDefineMast() {
     }
     
     if (numSignals < 1 || numSignals > 32) {
-      Console.println(F("Invalid number of signals"));
+      Console.println(F("Bad # of signals"));
       return;
     }
 
@@ -519,11 +520,11 @@ void commandDefineMast() {
   } else {
     const struct MastTypeDefinition& def = copySignalMastTypeDefinition(toTemplateIndex(mastType));
     numSignals = def.codeCount;
-    numLights = def.lightCount;
+    // numLights = def.lightCount;
     defSignal = def.defaultCode;
-    Console.print("Copying from template ");
-    Console.println(toTemplateIndex(mastType));
-    Console.print("signals: "); Console.print(numSignals); Console.print(" lights: "); Console.print(numLights); Console.print(" default: "); Console.println(defSignal);
+    // Console.print("Copying from template ");
+    // Console.println(toTemplateIndex(mastType));
+    // Console.print("signals: "); Console.print(numSignals); Console.print(" lights: "); Console.print(numLights); Console.print(" default: "); Console.println(defSignal);
     saveTemplateOutputsToCVs(def, mastIdx, firstOut);
     saveTemplateAspectsToCVs(mastIdx, mastType);
       // the signal set number
@@ -533,22 +534,22 @@ void commandDefineMast() {
   
   bits = findRequiredAddrCount(numSignals, mode);
   // number of addresses = bits
-  Console.print("Wrote to CV #"); Console.println(cvBase + 12, HEX);
+  // Console.print("Wrote to CV #"); Console.println(cvBase + 12, HEX);
   Dcc.setCV(cvBase + 12, bits);
 
   signalMastData[mastIdx].signalCount = numSignals;
   signalMastData[mastIdx].defaultAspect = defSignal;
   signalMastData[mastIdx].addressCount = bits;
-  Console.print(F("Mast #")); Console.print(nMast); Console.print(F(" uses outputs ")); Console.print(firstOut); Console.print(F(" - ")); Console.print(firstOut + numLights);
-  Console.print(F(" and ")); Console.print(bits); Console.println(F(" addresses."));
+  // Console.print(F("Mast #")); Console.print(nMast); Console.print(F(" uses outputs ")); Console.print(firstOut); Console.print(F(" - ")); Console.print(firstOut + numLights);
+  // Console.print(F(" and ")); Console.print(bits); Console.println(F(" addresses."));
 
-  Console.println(F("Definition open, END to finish."));
+  Console.println(F("Mast open, END to finish."));
 }
 
 void commandSetSignal() {
   int nMast = nextNumber();
   if (nMast < 1 || nMast > NUM_SIGNAL_MAST) {
-    Console.println(F("Invalid mast ID"));
+    Console.println(msg_InvalidMastID);
     return;
   }
   int mastID = nMast - 1;
@@ -557,19 +558,19 @@ void commandSetSignal() {
   byte newAspect;
 
   if (aspect < 1 || aspect > maxAspect) {
-    Console.println(F("Undefined aspect ID"));
+    Console.println(msg_InvalidAspect);
     newAspect = 255;
   } else {
     newAspect = aspectJmri(mastID, aspect - 1) ;
   }
   signalMastChangeAspect(mastID, newAspect);
-  Console.print(F("Mast #")); Console.print(nMast); Console.print(F(" set to aspect index #")); Console.print(aspect); Console.print('='); Console.println(newAspect);
+  // Console.print(F("Mast #")); Console.print(nMast); Console.print(F(" set to aspect index #")); Console.print(aspect); Console.print('='); Console.println(newAspect);
 }
 
 void commandGetCV() {
   int cv = nextNumber();
   if (cv < 1 || cv > 1023) {
-    Console.println(F("Invalid CV number"));
+    Console.println(F("Invalid CV #"));
     return;
   }
   int lastCV = nextNumber();
@@ -605,12 +606,12 @@ void commandGetCV() {
 void commandSetCV() {
   int cv = nextNumber();
   if (cv < 1 || cv > 512) {
-    Console.println(F("Invalid CV number"));
+    Console.println(F("Bad CV #"));
     return;
   }
   int val = nextNumber();
   if (val < 0 || val > 255) {
-    Console.println(F("Invalid CV value"));
+    Console.println(F("Bad CV value"));
     return;
   }
   int oldV = Dcc.getCV(cv);
@@ -618,31 +619,32 @@ void commandSetCV() {
   
   Dcc.setCV(cv, val);
   if (x > 0) {
-    Console.println(F("Notify CV change"));
+    // Console.println(F("Notify CV change"));
     notifyDccCVChange(cv, val);
   }
-  Console.print(F("Changed CV #")); Console.print(cv); Console.print(F(": ")); Console.print(oldV); Console.print(F(" => ")); Console.println(val);
+  // Console.print(F("Changed CV #")); Console.print(cv); Console.print(F(": ")); Console.print(oldV); Console.print(F(" => ")); Console.println(val);
 }
 
 void commandMastSet() {
   if (definedMast < 0) {
-    Console.println(F("No mast open. Use DEF:"));
+    Console.println(msg_MastNotNotOpened);
     return;
   }
   int nMast = definedMast;
   int signalSet = nextNumber();
   if (signalSet < 0 || signalSet >= _signal_set_last) {
-    Console.println(F("Invalid signal set"));
+    Console.println(F("Bad signal set"));
     return;
   }
   nMast--;
   int defaultAspect = nextNumber();
   int cv = START_CV_OUTPUT + nMast * SEGMENT_SIZE;
   int bits = Dcc.getCV(cv + 12);
-  if (defaultAspect < 0 || defaultAspect >= maxAspects || defaultAspect >= (1 << bits)) {
-    Console.println(F("Invalid default aspect"));
+  if (defaultAspect < 0 || defaultAspect > maxAspects || defaultAspect > (1 << bits)) {
+    Console.println(msg_InvalidAspect);
     return;
   }
+  defaultAspect--;
   Dcc.setCV(cv + 10, signalSet);
   Dcc.setCV(cv + 11, defaultAspect);
   signalMastData[nMast].set = (SignalSet)signalSet;
@@ -653,7 +655,7 @@ extern int inputDelim;
 
 void commandMapOutput() {
   if (definedMast < 0) {
-    Console.println(F("No mast opened"));
+    Console.println(msg_MastNotNotOpened);
     return;
   }
   int nMast = definedMast - 1;
@@ -672,7 +674,7 @@ void commandMapOutput() {
         outCV++;
         cnt++;
         break;
-      } else if (*inputPos != '-') {
+      } else /* if (*inputPos != '-') */ {
         int n = nextNumber();
         if (n < 0 || n + cnt > maxOutputsPerMast) {
           Console.println(F("Too much skipped"));
@@ -690,7 +692,7 @@ void commandMapOutput() {
     }
     int out = nextNumber(true);
     if (out < 1 || out > NUM_OUTPUTS) {
-      Console.println(F("Invalid output"));
+      Console.println(msg_InvalidOutput);
       return;
     }
     if (cnt >= maxOutputsPerMast) {
@@ -702,23 +704,23 @@ void commandMapOutput() {
       int to = nextNumber(false);
 
       if (to <= out || to > NUM_OUTPUTS) {
-        Console.println(F("Invalid output"));
+        Console.println(msg_InvalidOutput);
         return;
       }
       if (to - out > maxOutputsPerMast) {
         Console.println(F("Many outputs"));
         return;
       }
-      Console.print("out = "); Console.print(out); Console.print(" to "); Console.println(to);
+      // Console.print("out = "); Console.print(out); Console.print(" to "); Console.println(to);
       for (int i = out; i <= to; i++) {
-        Console.print("Add output "); Console.println(out);
+        // Console.print("Add output "); Console.println(out);
         Dcc.setCV(outCV, out);
         cnt++;
         out++;
         outCV++;
       }
     } else {
-      Console.print("Add output "); Console.println(out);
+      // Console.print("Add output "); Console.println(out);
       Dcc.setCV(outCV, out);
       cnt++;
       outCV++;
@@ -732,7 +734,7 @@ void commandMapOutput() {
 
 void commandMapAspects() {
   if (definedMast < 0) {
-    Console.println(F("No mast opened"));
+    Console.println(msg_MastNotNotOpened);
     return;
   }
   int nMast = definedMast - 1;
@@ -758,10 +760,10 @@ void commandMapAspects() {
         Dcc.setCV(cvBase + cur, 255);
         cur++;
         break;
-      } else if (*inputPos != '-') {
+      } else /* if (*inputPos != '-') */ {
         int n = nextNumber();
         if (n < 1 || cur + n > limit) {
-          Console.print(F("Invalid len"));
+          Console.print(F("Bad len"));
           return;
         }
         for (int x = 0; x < n; x++) {
@@ -784,7 +786,7 @@ void commandMapAspects() {
       inputPos++;
       cur = nextNumber();
       if (cur < 0) {
-        Console.print(F("Invalid index"));
+        Console.print(F("Bad index"));
         return;
       }
       continue;
@@ -795,7 +797,7 @@ void commandMapAspects() {
       break;
     }
     if (aspect >= maxAspects) {
-      Console.print(F("Bad aspect"));
+      Console.print(msg_InvalidAspect);
     }
     if (inputDelim == '-') {
       int aspectTo = nextNumber();
@@ -817,7 +819,7 @@ void commandMapAspects() {
 void commandOverride() {
   int n = nextNumber(true);
   if (n < 1 || n > NUM_OUTPUTS) {
-    Console.println(F("Invalid output"));
+    Console.println(msg_InvalidOutput);
     return;
   }
   int to = n;
@@ -857,7 +859,7 @@ void commandSave() {
 void commandAddress() {
   int n = nextNumber();
   if (n < 1 || n > 2048) {
-    Console.println("Invalid DCC address");
+    Console.println("Bad DCC address");
     return;
   }
   if (n < 128) {
@@ -876,7 +878,7 @@ void commandAddress() {
 void commandDccTurnout() {
   int tnt = nextNumber();
   if (tnt < 1) {
-    Console.print("Invalid turnout");
+    Console.print("Bad turnout");
     return;
   }
   int d = 0;
@@ -888,7 +890,7 @@ void commandDccTurnout() {
       d = 0;
       break;
     default:
-      Console.println(F("Invalid direction"));
+      Console.println(F("Bad direction"));
       return;
   }
   Console.print(F("Set turnout ")); Console.print(tnt); Console.print(' '); Console.println(d ? F("Straight") : F("Diverging"));

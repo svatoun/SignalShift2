@@ -259,7 +259,7 @@ static_assert(maxOutputsPerMast <= 16,  "Too many signals");
 static_assert(maxAspects <= 32, "Too many aspects");
 
 void signalMastChangeAspect(int nrSignalMast, byte newAspect);
-void signalMastChangeAspect(int progMemOffset, int tableSize, int nrSignalMast, byte newAspect);
+void signalMastChangeAspect(int progMemOffset, int tableSize, int nrSignalMast, SignalMastData& data, byte newAspect);
 
 const int NUM_8BIT_SHIFT_REGISTERS = (NUM_OUTPUTS + 7) / 8;
 
@@ -281,6 +281,9 @@ inline byte toTemplateIndex(byte b) {
   return x >= mastTypeDefinitionCount ? 0 : x;
 }
 
+extern SignalMastData signalMastData[NUM_SIGNAL_MAST];
+extern byte overrides[(NUM_OUTPUTS + 7) / 8];
+
 int findNumberOfSignals(int addresses, int mastType);
 void saveTemplateOutputsToCVs(const struct MastTypeDefinition& def, int mastIndex, int from);
 void saveTemplateOutputsToCVs(const struct MastTypeDefinition& def, int mastIndex, boolean stable);
@@ -290,8 +293,6 @@ int findNumberOfSignals(int addresses, int mastType);
 byte aspectJmri(int nrSignalMast, byte aspectMx);
 inline byte numberToPhysOutput(byte nrOutput);
 
-extern SignalMastData signalMastData[NUM_SIGNAL_MAST];
-extern byte overrides[(NUM_OUTPUTS + 7) / 8];
-
+SignalMastData& signalData(byte mast);
 
 #endif

@@ -21,6 +21,7 @@
 #include "SignalShift.h"
 #include "Terminal.h"
 #include "DecoderEnv.h"
+#include "messages.h"
 
 #ifdef AVR_DEBUG
 
@@ -119,6 +120,11 @@ HardwareSerial& Console = Serial1;
 HardwareSerial& Console = Serial;
 #endif
 
+void maybeInitLocalVariables();
+void initLocalVariables();
+void doChangeMastType(int mast, int signalSetOrMastType, boolean stable);
+void changeMastType(int mastIndex, int newType);
+int reassignMastOutputs(int mastIndex, int from, boolean propagate);
 
 /**********************************************************************************
  * Setup Arduino.
@@ -127,11 +133,12 @@ void setup() {
 #ifdef AVR_DEBUG
   debug_init();
 #endif
+  initSharedMessages();
 
   Console.begin(115200);
   Console.print(F("UNI16ARD-NAV-Shift version "));
   Console.println(SW_VERSION);
-  Console.println(F("Copyright (c) 2018, Petr Sidlo <sidlo64@seznam.cz>\nCopyright (c) 2022, Svatopluk Dedic <svatopluk.dedic@gmail.com>, APL 2.0 License"));
+  Console.println(msg_InitialMessage);
   Console.println(F("Booting..."));
 
   // initialize the digital pins as an outputs
@@ -179,7 +186,6 @@ void setupShiftPWM() {
 #endif
 }
 
-
 /**************************************************************************
  * Main loop.
  */
@@ -203,12 +209,16 @@ void loop() {
   }
 }
 
+SignalMastData& signalData(byte no) {
+  return signalMastData[no];
+}
+
 /**************************************************************************
  * 
  */
 int findSignalIndex(int address, int& position) {
   for (int i = 0; i < NUM_SIGNAL_MAST; i++) {
-    int num = signalMastData[i].addressCount;
+    int num = signalData(i).addressCount;
     // Console.print("Mast "); Console.print(i); Console.print(" Addresses: "); Console.println(num);
     if (address < num) {
       // Console.print("Found index "); Console.print(i); Console.print(" pos "); Console.println(address);
@@ -287,20 +297,20 @@ void setFactoryDefault() {
   Console.println(F("Resetting to factory defaults"));
   uint8_t FactoryDefaultCVSize = sizeof(FactoryDefaultCVs) / sizeof(CVPair);
 
-  Console.println(F("Setting default CV values"));
+  // Console.println(F("Setting default CV values"));
   for (uint16_t i = 0; i < FactoryDefaultCVSize; i++) {
     Dcc.setCV(FactoryDefaultCVs[i].CV, FactoryDefaultCVs[i].Value);
   }
 
   int cvNumber = START_CV_OUTPUT;
   int pgmIndex = (int)(void*)factorySignalMastOutputs;
-  Console.println(F("Copying factorySignalMastOutputs"));
+  // Console.println(F("Copying factorySignalMastOutputs"));
   for (unsigned int i = 0; i < sizeof(factorySignalMastOutputs); i++, cvNumber++) {
-    Console.print(F("CV ")); Console.print(cvNumber); Console.print(F(":=")); Console.println(pgm_read_byte_near(pgmIndex + i));
+    // Console.print(F("CV ")); Console.print(cvNumber); Console.print(F(":=")); Console.println(pgm_read_byte_near(pgmIndex + i));
     Dcc.setCV(cvNumber, pgm_read_byte_near(pgmIndex + i));
   }
 
-  Console.println(F("Clearing rest of signal CVs"));
+  // Console.println(F("Clearing rest of signal CVs"));
 
   for (unsigned int i = sizeof(factorySignalMastOutputs) / SEGMENT_SIZE; i < NUM_SIGNAL_MAST; i++) {
     for (unsigned int j = 0; j < sizeof(noSignalMastOutputs); j++, cvNumber++) {
@@ -308,7 +318,7 @@ void setFactoryDefault() {
     }
   }
 
-  Console.println(F("Generating aspect table"));
+  // Console.println(F("Generating aspect table"));
 
   uint16_t OutputCV = START_CV_ASPECT_TABLE;
   for (uint16_t i = 0; i < NUM_SIGNAL_MAST; i++) {
@@ -326,9 +336,9 @@ void setFactoryDefault() {
     
     // Console.print(F("pgmIndex for mast ")); Console.print(mast); Console.print(F(" = ")); Console.println((int)(&settingsDef), HEX);
     // Console.print(F("cvBase for mast ")); Console.print(mast); Console.print(F(" = ")); Console.println(cvBase);
-    int pgmIndex = (int)(&settingsDef.signalSetOrMastType);
+    int pgmIndex2 = (int)(&settingsDef.signalSetOrMastType);
     
-    byte signalSetOrMastType = pgm_read_byte_near(pgmIndex);
+    byte signalSetOrMastType = pgm_read_byte_near(pgmIndex2);
     if ((signalSetOrMastType & usesCodes) > 0) {
       doChangeMastType(mast, signalSetOrMastType, false);
     }
@@ -338,25 +348,27 @@ void setFactoryDefault() {
 
 const struct MastTypeDefinition& copySignalMastTypeDefinition(byte typeId);
 
-void doChangeMastType(int mast, int signalSetOrMastType, boolean stable) {
-  Console.print(F("Using template for mast ")); Console.println(mast);
+/* __attribute__((noinline)) */ void doChangeMastType(int mast, int signalSetOrMastType, boolean stable) {
+  // Console.print(F("Using template for mast ")); Console.println(mast);
 
-  const MastSettings& settingsDef = ((MastSettings*)factorySignalMastOutputs)[mast];
+  // NOT used as an actual address, but only as a number for computing 'cv'
+  const MastSettings& settingsDef = ((MastSettings*)factorySignalMastOutputs)[0];
   int cvBase = (sizeof(MastSettings) * mast) + START_CV_OUTPUT;
+  int cv = cvBase + ((int)(&settingsDef.defaultCodeOrAspect)) - ((int)(&settingsDef));
+
   const struct MastTypeDefinition& def = copySignalMastTypeDefinition(toTemplateIndex(signalSetOrMastType));
   int codeCount = def.codeCount;
   //int lightCount = def.lightCount;
 
-  printByteBuffer((byte*)&def, sizeof(def)); Console.println();
+  // printByteBuffer((byte*)&def, sizeof(def)); Console.println();
   saveTemplateOutputsToCVs(def, mast, stable);
 
-  int cv = cvBase + ((int)(&settingsDef.defaultCodeOrAspect)) - ((int)(&settingsDef));
   byte val = def.defaultCode;
-  Console.print(F("Setting cv default code ")); Console.print(cv); Console.print(F(" to ")); Console.println(val);
+  // Console.print(F("Setting cv default code ")); Console.print(cv); Console.print(F(" to ")); Console.println(val);
   Dcc.setCV(cv, val);
   cv++;
   val = findRequiredAddrCount(codeCount, signalSetOrMastType);
-  Console.print(F("Setting cv addresses ")); Console.print(cv); Console.print(F(" to ")); Console.println(val);
+  // Console.print(F("Setting cv addresses ")); Console.print(cv); Console.print(F(" to ")); Console.println(val);
   Dcc.setCV(cv, val);
 
   cv = START_CV_ASPECT_TABLE + mast * maxAspects;
@@ -366,7 +378,7 @@ void doChangeMastType(int mast, int signalSetOrMastType, boolean stable) {
   }
 }
 
-void changeMastType(int mastIndex, int newType) {
+__attribute__((noinline)) void changeMastType(int mastIndex, int newType) {
   if (newType == 0) {
     int cv = START_CV_OUTPUT + (mastIndex * SEGMENT_SIZE);
     for (unsigned int i = 0; i < maxOutputsPerMast; i++) {
@@ -504,7 +516,7 @@ int findNextLight(int mast) {
 }
 
 void saveTemplateAspectsToCVs(int mast, int signalSetOrMastType) {
-  Console.print(F("Using template aspects for mast ")); Console.println(mast);
+  // Console.print(F("Using template aspects for mast ")); Console.println(mast);
 
   const struct MastTypeDefinition& def = copySignalMastTypeDefinition(toTemplateIndex(signalSetOrMastType));
 
@@ -518,7 +530,7 @@ void saveTemplateAspectsToCVs(int mast, int signalSetOrMastType) {
 }  
 
 void saveTemplateOutputsToCVs(const struct MastTypeDefinition& def, int mastIndex, boolean stable) {
-  Console.print(F("Setting outputs to mast #")); Console.print(mastIndex); Console.print(F(" from def ")); Console.println((int)(int*)(&def), HEX);
+  // Console.print(F("Setting outputs to mast #")); Console.print(mastIndex); Console.print(F(" from def ")); Console.println((int)(int*)(&def), HEX);
   int minLightNumber = findMinLightIndex(mastIndex);
   //int oldLightCount = findLightCount(mastIndex);
   int from = findNextLight(mastIndex);
@@ -541,7 +553,7 @@ void saveTemplateOutputsToCVs(const struct MastTypeDefinition& def, int mastInde
     } else {
       n = ONA;
     }
-    Console.print(F("Set CV ")); Console.print(cvIndex); Console.print(F(" := ")); Console.println(n);
+    // Console.print(F("Set CV ")); Console.print(cvIndex); Console.print(F(" := ")); Console.println(n);
     Dcc.setCV(cvIndex, n);
     cvIndex++;
   }
@@ -550,11 +562,11 @@ void saveTemplateOutputsToCVs(const struct MastTypeDefinition& def, int mastInde
   Dcc.setCV(cvIndex, def.defaultCode);
 }
 
-int reassignMastOutputs(int mastIndex, int from, boolean propagate) {
+__attribute__((noinline)) int reassignMastOutputs(int mastIndex, int from, boolean propagate) {
   int nextInput = -1;
 
   while (mastIndex < NUM_SIGNAL_MAST) {
-    int nextInput = reassignMastOutputs2(mastIndex, from);
+    nextInput = reassignMastOutputs2(mastIndex, from);
     if (!propagate) {
       return nextInput;
     }
@@ -585,7 +597,7 @@ int reassignMastOutputs2(int mastIndex, int from) {
 
   int lastOutput = -1;
 
-  Console.print(F("Reassigning outputs for ")); Console.print(mastIndex); Console.print(F(" start from ")); Console.println(from);
+  // Console.print(F("Reassigning outputs for ")); Console.print(mastIndex); Console.print(F(" start from ")); Console.println(from);
 
   for (unsigned int i = 0; i < sizeof(MastSettings::outputs); i++) {
     byte n = Dcc.getCV(cvIndex);
@@ -603,11 +615,11 @@ int reassignMastOutputs2(int mastIndex, int from) {
 /**********************************************************************************
  * Init local variables.
  */
-void initLocalVariables() {
+/* __attribute__((noinline)) */void initLocalVariables() {
   reinitializeLocalVariables = true;
 }
 
-void maybeInitLocalVariables() {
+__attribute__((noinline)) void maybeInitLocalVariables() {
   if (!reinitializeLocalVariables) {
     return;
   }
@@ -657,26 +669,11 @@ void initLocalVariablesSignalMast() {
   static byte usedOutputs[(NUM_OUTPUTS + 7) / 8] = { 0 };
 
   for (int i = 0; i < NUM_SIGNAL_MAST; i++) {
-    recordOutput(usedOutputs, Dcc.getCV(counter));  // yellow upper
-    counter++;
-    recordOutput(usedOutputs, Dcc.getCV(counter));  // green
-    counter++;
-    recordOutput(usedOutputs, Dcc.getCV(counter));  // red
-    counter++;
-    recordOutput(usedOutputs, Dcc.getCV(counter));  // lunar
-    counter++;
-    recordOutput(usedOutputs, Dcc.getCV(counter));  // yellow lower
-    counter++;
-    recordOutput(usedOutputs, Dcc.getCV(counter));  // blue
-    counter++;
-    recordOutput(usedOutputs, Dcc.getCV(counter));  // green strip
-    counter++;
-    recordOutput(usedOutputs, Dcc.getCV(counter));  // yellow strip
-    counter++;
-    recordOutput(usedOutputs, Dcc.getCV(counter));  // lunar lower
-    counter++;
-    recordOutput(usedOutputs, Dcc.getCV(counter));  // backward
-    counter++;
+    // record for each output
+    for (int l = 0; l < maxOutputsPerMast; l++) {
+      recordOutput(usedOutputs, Dcc.getCV(counter));  // yellow upper
+      counter++;
+    }
 
     byte mastTypeOrSignalSet = Dcc.getCV(counter);
     counter++;
@@ -684,51 +681,53 @@ void initLocalVariablesSignalMast() {
 
     if ((mastTypeOrSignalSet & usesCodes) > 0) {
       signalSet = findMastTypeSignalSet(mastTypeOrSignalSet);
+    } else {
+      signalSet = mastTypeOrSignalSet;
     }
     signalSet = signalSet & (~signalSetFlags);
-    if ((signalSet < 0) || (signalSet >= maxSignalSets)) {
+    if (signalSet >= maxSignalSets) {
       signalSet = 0;
     }
 
-    signalMastData[i].set = (SignalSet)signalSet;
+    SignalMastData& data = signalData(i);
+
+    data.set = (SignalSet)signalSet;
 
     byte defaultAspectIdx = Dcc.getCV(counter);
     counter++;
 
-    signalMastData[i].defaultAspect = defaultAspectIdx;
-    signalMastData[i].addressCount = Dcc.getCV(counter);
+    data.defaultAspect = defaultAspectIdx;
+    data.addressCount = Dcc.getCV(counter);
     // Console.print(F("Addresses: ")); Console.println(signalMastNumberAddress[i]);
     counter++;
 
-    signalMastData[i].signalCount = findNumberOfSignals(signalMastData[i].addressCount, mastTypeOrSignalSet);
+    data.signalCount = findNumberOfSignals(data.addressCount, mastTypeOrSignalSet);
 
-    for (int i = 0; i < NUM_OUTPUTS; i++) {
-      boolean used = bitRead(usedOutputs[i / 8], i % 8);
-      if (!used) {
+  }
+
+  // clear out all unused outputs: set them to HIGH, so the voltage diff against common + will be 0.
+  for (int j = 0; j < NUM_OUTPUTS; j++) {
+    boolean used = bitRead(usedOutputs[j / 8], j % 8);
+    if (!used) {
 #ifdef Shift
-        ShiftPWM.SetOne(numberToPhysOutput(i), 0);
+      ShiftPWM.SetOne(numberToPhysOutput(j), 0);
 #endif        
-      }
     }
   }
 
   maxDecoderAddress = thisDecoderAddress;
   for (int i = 0; i < numSignalNumber; i++) {
-    maxDecoderAddress = maxDecoderAddress + signalMastData[i].addressCount;
+    const SignalMastData& data = signalData(i);
+    maxDecoderAddress = maxDecoderAddress + data.addressCount;
+    signalMastData[i].setCode(data.defaultAspect);
   }
   // Console.print(F("Max address: ")); Console.println(maxDecoderAddress);
-
-  for (int i = 0; i < numSignalNumber; i++) {
-    signalMastData[i].setCode(signalMastData[i].defaultAspect);
-  }
 }
-
-int currentBulbTimeSpan = -1;
 
 unsigned int timeElapsedForBulb(byte nrOutput) {
   unsigned int start = (lightStartTimeBubl[nrOutput] & 0xffff);
   if (start == 0) {
-    return currentBulbTimeSpan = UINT16_MAX;
+    return UINT16_MAX;
   }
   unsigned int cur = currentTime & 0xffff;
   int span;
@@ -739,9 +738,9 @@ unsigned int timeElapsedForBulb(byte nrOutput) {
     span = cur - start;
   }
   if (span >= INT16_MAX) {
-    return currentBulbTimeSpan = INT16_MAX;
+    return INT16_MAX;
   } else {
-    return currentBulbTimeSpan = (int)span;
+    return (int)span;
   }
 }
 
@@ -893,13 +892,14 @@ void signalMastChangePos(int nrSignalMast, uint16_t pos, uint8_t Direction) {
     Console.println(nrSignalMast);
     return;
   }
-  if (pos >= signalMastData[nrSignalMast].addressCount) {
+  SignalMastData& data = signalData(nrSignalMast);
+  if (pos >= data.addressCount) {
     Console.print(F("Error: mastChangePos pos out of range"));
     Console.println(pos);
     return;
   }
   
-  byte oldAspectIdx = signalMastData[nrSignalMast].getLastCode();
+  byte oldAspectIdx = data.getLastCode();
   byte newAspectIdx = oldAspectIdx;
   // Console.print("existing aspect: "); Console.println(newAspectIdx);
   byte type = getMastTypeOrSignalSet(nrSignalMast);
@@ -934,61 +934,69 @@ void signalMastChangePos(int nrSignalMast, uint16_t pos, uint8_t Direction) {
     Console.println(newAspectIdx);
     return;
   }
-  signalMastData[nrSignalMast].setCode(newAspectIdx);
+  data.setCode(newAspectIdx);
 }
 
 /**********************************************************************************
  *
  */
 void processAspectCode(int nrSignalMast) {
-  if (!signalMastData[nrSignalMast].isReadyForProcess()) {
+  SignalMastData& data = signalData(nrSignalMast);
+  if (!data.isReadyForProcess()) {
     return;
   }
 
-  byte newCode = signalMastData[nrSignalMast].processed();
+  byte newCode = data.processed();
   byte newAspect = aspectJmri(nrSignalMast, newCode);
   signalMastChangeAspect(nrSignalMast, newAspect);
 }
 
-void signalMastChangeAspectCsdBasic(int nrSignalMast, byte newAspect);
-void signalMastChangeAspectCsdMechanical(int nrSignalMast, byte newAspect);
-void signalMastChangeAspectCsdIntermediate(int nrSignalMast, byte newAspect);
-void signalMastChangeAspectCsdEmbedded(int nrSignalMast, byte newAspect);
-void signalMastChangeAspectSzdcBasic(int nrSignalMast, byte newAspect);
+void signalMastChangeAspectCsdBasic(SignalMastData& data, int nrSignalMast, byte newAspect);
+void signalMastChangeAspectCsdMechanical(SignalMastData& data, int nrSignalMast, byte newAspect);
+void signalMastChangeAspectCsdIntermediate(SignalMastData& data, int nrSignalMast, byte newAspect);
+void signalMastChangeAspectCsdEmbedded(SignalMastData& data, int nrSignalMast, byte newAspect);
+void signalMastChangeAspectSzdcBasic(SignalMastData& data, int nrSignalMast, byte newAspect);
 
 /**********************************************************************************
  *
  */
+
 void signalMastChangeAspect(int nrSignalMast, byte newAspect) {
+  SignalMastData& data = signalData(nrSignalMast);
+  signalMastChangeAspect(data, nrSignalMast, newAspect);
+}
+
+void signalMastChangeAspect(SignalMastData& data, int nrSignalMast, byte newAspect) {
   // diagnostics: light up everything.
   if (newAspect == 255) {
-    signalMastChangeAspectCsdBasic(nrSignalMast, 26);
+    signalMastChangeAspectCsdBasic(data, nrSignalMast, 26);
     return;
   }
   if (newAspect > maxAspects || newAspect == 0) {
     // aspect is invalid, or undefined all off
-    signalMastChangeAspectCsdMechanical(nrSignalMast, 1);
+    signalMastChangeAspectCsdMechanical(data, nrSignalMast, 1);
     return;
   }
   newAspect--;
-  if (signalMastData[nrSignalMast].currentAspect == newAspect) {
+  if (data.currentAspect == newAspect) {
     return;
   }
-  switch (signalMastData[nrSignalMast].set) {
+  const byte set = data.set;
+  switch (set) {
     case SIGNAL_SET_CSD_BASIC:
-      signalMastChangeAspectCsdBasic(nrSignalMast, newAspect);
+      signalMastChangeAspectCsdBasic(data, nrSignalMast, newAspect);
       break;
     case SIGNAL_SET_CSD_INTERMEDIATE:
-      signalMastChangeAspectCsdIntermediate(nrSignalMast, newAspect);
+      signalMastChangeAspectCsdIntermediate(data, nrSignalMast, newAspect);
       break;
     case SIGNAL_SET_CSD_EMBEDDED:
-      signalMastChangeAspectCsdEmbedded(nrSignalMast, newAspect);
+      signalMastChangeAspectCsdEmbedded(data, nrSignalMast, newAspect);
       break;
     case SIGNAL_SET_SZDC_BASIC:
-      signalMastChangeAspectSzdcBasic(nrSignalMast, newAspect);
+      signalMastChangeAspectSzdcBasic(data, nrSignalMast, newAspect);
       break;
     case SIGNAL_SET_CSD_MECHANICAL:
-      signalMastChangeAspectCsdMechanical(nrSignalMast, newAspect);
+      signalMastChangeAspectCsdMechanical(data, nrSignalMast, newAspect);
       break;
     case DisabledSignalSet:
     case _signal_set_last:
@@ -999,24 +1007,19 @@ void signalMastChangeAspect(int nrSignalMast, byte newAspect) {
 /**********************************************************************************
  *
  */
-void signalMastChangeAspect(int progMemOffset, int tableSize, int nrSignalMast, byte newAspect) {
+void signalMastChangeAspect(int progMemOffset, int tableSize, int nrSignalMast, SignalMastData& data, byte newAspect) {
   if (debugAspects) {
     Console.print(F("Change mast "));
-    Console.print(nrSignalMast);
+    Console.print(&data - signalMastData);
     Console.print(F(" to aspect "));
     Console.println(newAspect);
   }
-  if (nrSignalMast < 0 || nrSignalMast >= NUM_SIGNAL_MAST) {
-    Console.print(F("Invalid mast "));
-    Console.println(nrSignalMast);
-    return;
-  }
   if (newAspect >= tableSize) {
-    Console.print(F("Invalid aspect "));
+    Console.print(msg_InvalidAspect);
     Console.println(newAspect);
     return;
   }
-  signalMastData[nrSignalMast].currentAspect = newAspect;
+  data.currentAspect = newAspect;
 
   // Configuration of light outputs
   LightFunction buffer[maxOutputsPerMast];
@@ -1104,7 +1107,6 @@ void processFadeOnOrOff(byte nrOutput, boolean fadeOn) {
 
 void processFadeOn(byte nrOutput) {
   processFadeOnOrOff(nrOutput, true);
-  return;
   unsigned int idx = 0;
   unsigned int limit = (sizeof(fadeTimeLight) / sizeof(fadeTimeLight[0]));
 
@@ -1137,7 +1139,6 @@ void processFadeOn(byte nrOutput) {
  */
 void processFadeOff(byte nrOutput) {
   processFadeOnOrOff(nrOutput, false);
-  return;
   int idx;
   int limit = (sizeof(fadeTimeLight) / sizeof(fadeTimeLight[0]));
   unsigned int elapsed = timeElapsedForBulb(nrOutput);
@@ -1178,7 +1179,6 @@ void notifyCVAck() {
  * CV was changed.
  */
 void notifyCVChange(uint16_t CV, uint8_t Value) {
-  return;
   if (CV >= START_CV_OUTPUT && CV <= END_CV_OUTPUT) {
     int diff = CV - START_CV_OUTPUT;
     if ((diff % SEGMENT_SIZE) == maxOutputsPerMast) {
@@ -1288,7 +1288,7 @@ uint8_t notifyCVValid(uint16_t CV, uint8_t Writable) {
     return false;
   }
 
-  if (unlocked && Writable && (CV == CV_VERSION_ID)) {
+  if (Writable && (CV == CV_VERSION_ID)) {
     return false;
   }
 

@@ -34,6 +34,7 @@ struct ModuleChain {
 
   static boolean invokeAll(ModuleCmd cmd);
 };
+/*
 
 extern char printBuffer[];
 
@@ -51,6 +52,7 @@ __attribute__((noinline)) char *printNumber(char *out, int no, int base) {
   itoa(no, out, base);
   return out + strlen(out);
 }
+*/
 
 extern char *inputPos;
 extern char *inputEnd;
