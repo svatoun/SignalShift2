@@ -361,9 +361,26 @@ void setFactoryDefault() {
     byte signalSetOrMastType = pgm_read_byte_near(pgmIndex2);
     if ((signalSetOrMastType & usesCodes) > 0) {
       doChangeMastType(mast, signalSetOrMastType, false);
+    } else {
+      clearMast(mast);
     }
   }
   initLocalVariables();
+}
+
+void clearMast(byte mast) {
+  const MastSettings& settingsDef = ((MastSettings*)factorySignalMastOutputs)[0];
+  int cvBase = (sizeof(MastSettings) * mast) + START_CV_OUTPUT;
+  for (byte b = cvBase; b < cvBase + maxOutputsPerMast; b++) {
+    Dcc.setCV(b, ONA);
+  }
+  int cv = START_CV_ASPECT_TABLE + mast * maxAspects;
+  for (unsigned int i = 0; i < maxAspects; i++) {
+    Dcc.setCV(cv, 255);
+    cv++;
+  }
+  cv = cvBase + ((int)(&settingsDef.defaultCodeOrAspect)) - ((int)(&settingsDef));
+  Dcc.setCV(cv, 0);
 }
 
 const struct MastTypeDefinition& copySignalMastTypeDefinition(byte typeId);
@@ -396,12 +413,14 @@ const struct MastTypeDefinition& copySignalMastTypeDefinition(byte typeId);
     Dcc.setCV(cv, def.code2Aspect[i]);
     cv++;
   }
+  signalMastData[mast].setCode(val);
 }
 
 __attribute__((noinline)) void changeMastType(int mastIndex, int newType) {
   if (newType == 0) {
     int cv = START_CV_OUTPUT + (mastIndex * SEGMENT_SIZE);
     for (unsigned int i = 0; i < maxOutputsPerMast; i++) {
+      ShiftPWM.SetOne(Dcc.getCV(cv + i), 0);
       Dcc.setCV(cv + i, 0);
     }
     // number of addresses.
@@ -409,6 +428,7 @@ __attribute__((noinline)) void changeMastType(int mastIndex, int newType) {
     return;
   }
   if ((newType & usesCodes) == 0) {
+    signalMastData[mastIndex].setCode(255);
     return;
   }
   doChangeMastType(mastIndex, newType, true);
@@ -433,7 +453,7 @@ void printByteBuffer(const byte* buf, int size) {
   }
 }
 
-int findNumberOfSignals(int addresses, int mastType) {
+int findNumberOfCodes(int addresses, int mastType) {
   if (mastType & usesCodes) {
     const struct MastTypeDefinition& def = copySignalMastTypeDefinition(toTemplateIndex(mastType));
     return def.codeCount;
@@ -540,7 +560,7 @@ void saveTemplateAspectsToCVs(int mast, int signalSetOrMastType) {
 
   const struct MastTypeDefinition& def = copySignalMastTypeDefinition(toTemplateIndex(signalSetOrMastType));
 
-  printByteBuffer((byte*)&def.code2Aspect, sizeof(def.code2Aspect)); Console.println();
+  // printByteBuffer((byte*)&def.code2Aspect, sizeof(def.code2Aspect)); Console.println();
 
   int cv = START_CV_ASPECT_TABLE + mast * maxAspects;
   for (unsigned int i = 0; i < sizeof(def.code2Aspect); i++) {
@@ -577,6 +597,7 @@ void saveTemplateOutputsToCVs(const struct MastTypeDefinition& def, int mastInde
     Dcc.setCV(cvIndex, n);
     cvIndex++;
   }
+  // printByteBuffer((byte*)&def.outputs, sizeof(def.outputs)); Console.println();
   // skip the aspect table/template.
   cvIndex++;
   Dcc.setCV(cvIndex, def.defaultCode);
@@ -687,6 +708,7 @@ void initLocalVariablesSignalMast() {
 
   int counter = START_CV_OUTPUT;
   static byte usedOutputs[(NUM_OUTPUTS + 7) / 8] = { 0 };
+  maxDecoderAddress = thisDecoderAddress;
 
   for (int i = 0; i < NUM_SIGNAL_MAST; i++) {
     // record for each output
@@ -716,13 +738,15 @@ void initLocalVariablesSignalMast() {
     byte defaultAspectIdx = Dcc.getCV(counter);
     counter++;
 
-    data.defaultAspect = defaultAspectIdx;
-    data.addressCount = Dcc.getCV(counter);
+    byte addrCount = Dcc.getCV(counter);
+    data.addressCount = addrCount;
     // Console.print(F("Addresses: ")); Console.println(signalMastNumberAddress[i]);
     counter++;
 
-    data.signalCount = findNumberOfSignals(data.addressCount, mastTypeOrSignalSet);
+    data.codeCount = findNumberOfCodes(data.addressCount, mastTypeOrSignalSet);
+    maxDecoderAddress = maxDecoderAddress + addrCount;
 
+    signalMastData[i].setCode(defaultAspectIdx);
   }
 
   // clear out all unused outputs: set them to HIGH, so the voltage diff against common + will be 0.
@@ -734,14 +758,6 @@ void initLocalVariablesSignalMast() {
 #endif        
     }
   }
-
-  maxDecoderAddress = thisDecoderAddress;
-  for (int i = 0; i < numSignalNumber; i++) {
-    const SignalMastData& data = signalData(i);
-    maxDecoderAddress = maxDecoderAddress + data.addressCount;
-    signalMastData[i].setCode(data.defaultAspect);
-  }
-  // Console.print(F("Max address: ")); Console.println(maxDecoderAddress);
 }
 
 unsigned int timeElapsedForBulb(byte nrOutput) {
@@ -1224,18 +1240,6 @@ void notifyCVChange(uint16_t CV, uint8_t Value) {
     initLocalVariables();
     return;
   }
-  if (CV >= START_CV_OUTPUT_BASE && CV <= END_CV_OUTPUT_BASE) {
-    int mast = CV - START_CV_OUTPUT_BASE;
-    boolean shift;
-    if (Value > 100) {
-      Value -= 100;
-      shift = true;
-    } else {
-      shift = false;
-    }
-    reassignMastOutputs(mast, Value, shift);
-    initLocalVariables();
-  }
 }
 
 void notifyDccCVChange(uint16_t CV, uint8_t Value) {
@@ -1303,6 +1307,18 @@ void notifyDccCVChange(uint16_t CV, uint8_t Value) {
     initializeFadeTime();
     return;
   }
+  if (CV >= START_CV_OUTPUT_BASE && CV <= END_CV_OUTPUT_BASE) {
+    int mast = CV - START_CV_OUTPUT_BASE;
+    boolean shift;
+    if (Value > 100) {
+      Value -= 100;
+      shift = true;
+    } else {
+      shift = false;
+    }
+    reassignMastOutputs(mast, Value, shift);
+    initLocalVariables();
+  }
 }
 
 /******************************************************************************
@@ -1356,6 +1372,9 @@ uint8_t isUnlocked(uint16_t CV) {
  * 
  */
 byte aspectJmri(int nrSignalMast, byte aspectMx) {
+  if (aspectMx >= maxAspects) {
+    return 255;
+  }
 
   byte aspectJmri;
 

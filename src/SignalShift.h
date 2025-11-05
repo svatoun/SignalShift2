@@ -208,17 +208,12 @@ public:
   boolean changed : 1;  // lastCode was set, but not converted to the aspect.
   SignalSet set : 3;
   byte addressCount : 3;
-  byte signalCount : 4; // 0..maxOutputsPerMast
+  byte codeCount : 4; // 0..maxOutputsPerMast; maximum usable number of codes. 
   byte currentAspect : 5; // 0..maxAspects
   byte lastCode : 5;  // last code set to the signal
   unsigned int lastTime;  // time the last code was set
-  byte defaultAspect;
  
-  SignalMastData() : changed(false), set(SIGNAL_SET_CSD_BASIC), addressCount(0), signalCount(0), currentAspect(0), lastCode(0), lastTime(0), defaultAspect(255) {}
-
-  unsigned int maxSignalCount() {
-    return 1 << addressCount;
-  }
+  SignalMastData() : changed(false), set(SIGNAL_SET_CSD_BASIC), addressCount(0), codeCount(0), currentAspect(0), lastCode(0), lastTime(0) {}
 
   boolean isReadyForProcess() {
     if (!changed) {
@@ -284,16 +279,19 @@ inline byte toTemplateIndex(byte b) {
 extern SignalMastData signalMastData[NUM_SIGNAL_MAST];
 extern byte overrides[(NUM_OUTPUTS + 7) / 8];
 
-int findNumberOfSignals(int addresses, int mastType);
+int findNumberOfCodes(int addresses, int mastType);
 void saveTemplateOutputsToCVs(const struct MastTypeDefinition& def, int mastIndex, int from);
 void saveTemplateOutputsToCVs(const struct MastTypeDefinition& def, int mastIndex, boolean stable);
 void saveTemplateAspectsToCVs(int mast, int signalSetOrMastType);
 int findRequiredAddrCount(int codes, int mastType);
-int findNumberOfSignals(int addresses, int mastType);
+int findNumberOfCodes(int addresses, int mastType);
 byte aspectJmri(int nrSignalMast, byte aspectMx);
 inline byte numberToPhysOutput(byte nrOutput);
 byte getMastOutput(byte nMast, byte light);
 LightFunction getBulbState(byte n);
 SignalMastData& signalData(byte mast);
+int findLightCount(int mast);
+__attribute__((noinline)) int reassignMastOutputs(int mastIndex, int from, boolean propagate);
+/* __attribute__((noinline)) */void initLocalVariables();
 
 #endif

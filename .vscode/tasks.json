@@ -1,0 +1,35 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run SimAVR Test (GDB server)",
+            "type": "shell",
+            "command": "/home/sdedic/.platformio/penv/bin/pio",
+            "args": [
+                "test",
+                "--environment",
+                "megadebug",
+                "--without-uploading",
+                "-vv"
+            ],
+            "group": "none",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": false,
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "type": "PlatformIO",
+            "task": "Test (megadebug)",
+            "options": { "env": { "PIO_WITHOUT_UPLOADING": "1" } },
+            "problemMatcher": [
+                "$platformio"
+            ],
+            "group": "test",
+            "label": "PlatformIO: Test (megadebug)"
+        }
+    ]
+}

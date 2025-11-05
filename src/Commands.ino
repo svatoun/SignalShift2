@@ -89,7 +89,7 @@ boolean shouldPrintAspects(int nMast) {
   }
   
   int addresses = Dcc.getCV(cvBase + maxOutputsPerMast + 2);
-  int limit = findNumberOfSignals(addresses, control);
+  int limit = findNumberOfCodes(addresses, control);
 
   int aspectBase = START_CV_ASPECT_TABLE + nMast * maxAspects;
 
@@ -107,6 +107,8 @@ boolean shouldPrintAspects(int nMast) {
 void printMastDef(int nMast) {
   int first = 0xff;
   int cnt = 0;
+
+  MastSettings dummy;
   
   int cvBase = sizeof(MastSettings) * nMast + START_CV_OUTPUT;
   for (int i = 0; i < maxOutputsPerMast; i++) {
@@ -127,7 +129,7 @@ void printMastDef(int nMast) {
   Console.print(F("DEF:")); Console.print(nMast + 1); Console.print(':'); 
   Console.print(first); Console.print(':');   
 
-  int mode = Dcc.getCV(cvBase + 10);
+  int mode = Dcc.getCV(cvBase + (&dummy.signalSetOrMastType - &dummy.outputs[0]));
   switch (mode & signalSetControlType) {
     case bitwiseControl:
       Console.print('b');
@@ -187,10 +189,10 @@ void printMastDef(int nMast) {
   }
   if (!codes) {
     Console.print(cnt); Console.print(':'); 
-    Console.println(signalMastData[nMast].signalCount);
+    Console.println(signalMastData[nMast].codeCount);
   }
   byte mastSet = signalMastData[nMast].set;
-  byte mastDefault = signalMastData[nMast].defaultAspect;
+  byte mastDefault = Dcc.getCV(cvBase + (&dummy.defaultCodeOrAspect - &dummy.outputs[0]));
   if (mastSet != set || mastDefault != defcode) {
     Console.print(F("  MSS:")); Console.print(mastSet); Console.print(':'); Console.println(mastDefault);
   }
@@ -233,7 +235,7 @@ void printMastOutputs(int nMast, boolean suppressFull) {
       if (skipCnt == 2) {
         Console.print('-');
       } else if (skipCnt > 2) {
-        Console.print(skipCnt - 1);
+        Console.print(skipCnt);
       }
       Console.print(':');
     }
@@ -305,7 +307,7 @@ void printAspectMap(int nMast) {
   int cvBase = sizeof(MastSettings) * nMast + START_CV_OUTPUT;
   byte mastTypeOrSignalSet = Dcc.getCV(cvBase + maxOutputsPerMast);
   int addresses = Dcc.getCV(cvBase + maxOutputsPerMast + 2);
-  int limit = findNumberOfSignals(addresses, mastTypeOrSignalSet);
+  int limit = findNumberOfCodes(addresses, mastTypeOrSignalSet);
   // Console.print("type = "); Console.println(mastTypeOrSignalSet);
   // Console.print("Limit = "); Console.println(limit);
   int copyOf = findSameAspect(nMast);
@@ -410,8 +412,22 @@ void commandDefineMast() {
     return;
   }
 
-  int mastType = -1;
+  int mastIdx = nMast - 1;
 
+  if (*inputPos == 0 || *inputPos == '*') {
+    int cnt = findLightCount(mastIdx);
+    if (firstOut + cnt > NUM_OUTPUTS) {
+      Console.println(msg_InvalidOutput);
+      return;
+    }
+    Dcc.setCV(START_CV_OUTPUT_BASE + mastIdx, firstOut);
+    Console.print(F("Mast ")); Console.print(nMast); Console.print(F(" outputs moved to ")); Serial.println(firstOut);
+    reassignMastOutputs(mastIdx, firstOut, *inputPos == '*');
+    initLocalVariables();
+    return;
+  }
+
+  int mastType = -1;
   int mode = -1;
   switch (*inputPos) {
     case 'b': case 'B':
@@ -445,9 +461,8 @@ void commandDefineMast() {
   int signalSetOrMastType = mode | SIGNAL_SET_CSD_BASIC;
   int defSignal = 0;
   int bits = 0;
-  int mastIdx = nMast - 1;
   int cvBase = START_CV_OUTPUT + (mastIdx) * SEGMENT_SIZE;
-  
+
   if (*inputPos == '+') {
     const char *s = ++inputPos;
     char *e = strchr(inputPos, ':');
@@ -517,8 +532,6 @@ void commandDefineMast() {
         Dcc.setCV(cvBase + i, firstOut + i - 1);
       }
     }
-    // the signal set number
-    Dcc.setCV(cvBase + 10, signalSetOrMastType);
     // the default signal
     Dcc.setCV(cvBase + 11, 0);
     signalMastData[mastIdx].set = SIGNAL_SET_CSD_BASIC;
@@ -533,7 +546,7 @@ void commandDefineMast() {
     saveTemplateOutputsToCVs(def, mastIdx, firstOut);
     saveTemplateAspectsToCVs(mastIdx, mastType);
       // the signal set number
-    Dcc.setCV(cvBase + 10, mastType & 0xff);
+    signalSetOrMastType = mastType & 0xff;
     signalMastData[mastIdx].set = def.signalSet;
   }
   
@@ -542,12 +555,14 @@ void commandDefineMast() {
   // Console.print("Wrote to CV #"); Console.println(cvBase + 12, HEX);
   Dcc.setCV(cvBase + 12, bits);
 
-  signalMastData[mastIdx].signalCount = numSignals;
-  signalMastData[mastIdx].defaultAspect = defSignal;
+  signalMastData[mastIdx].codeCount = findNumberOfCodes(bits, mode);
+  Dcc.setCV(cvBase + 11, defSignal);
   signalMastData[mastIdx].addressCount = bits;
   // Console.print(F("Mast #")); Console.print(nMast); Console.print(F(" uses outputs ")); Console.print(firstOut); Console.print(F(" - ")); Console.print(firstOut + numLights);
   // Console.print(F(" and ")); Console.print(bits); Console.println(F(" addresses."));
 
+  // the signal set number
+  Dcc.setCV(cvBase + 10, signalSetOrMastType);
   Console.println(F("Mast open, END to finish."));
 }
 
@@ -559,7 +574,7 @@ void commandSetSignal() {
   }
   int mastID = nMast - 1;
   int aspect = nextNumber();
-  int maxAspect = signalMastData[mastID].maxSignalCount();
+  int maxAspect = signalMastData[mastID].codeCount;
   byte newAspect;
 
   if (aspect < 1 || aspect > maxAspect) {
@@ -650,13 +665,14 @@ void commandMastSet() {
     return;
   }
   defaultAspect--;
-  Dcc.setCV(cv + 10, signalSet);
   Dcc.setCV(cv + 11, defaultAspect);
   signalMastData[nMast].set = (SignalSet)signalSet;
-  signalMastData[nMast].defaultAspect = defaultAspect;
+  Dcc.setCV(cv + 10, signalSet);
 }
 
 extern int inputDelim;
+
+void defineRanges(byte min, byte countExclusive, byte countLimitExclusive, byte limitExclusive, int cvBase, byte noValue);
 
 void commandMapOutput() {
   if (definedMast < 0) {
@@ -666,147 +682,67 @@ void commandMapOutput() {
   int nMast = definedMast - 1;
   int outCV = START_CV_OUTPUT + (nMast) * SEGMENT_SIZE;
   int cnt = 0;
-  while (*inputPos) {
-    while (*inputPos == '-') {
-      inputPos++;
-      if (*inputPos == ':' || *inputPos == '-') {
-        Dcc.setCV(outCV, ONA);
-        outCV++;
-        cnt++;
-        continue;
-      } else if (!*inputPos) {
-        Dcc.setCV(outCV, ONA);
-        outCV++;
-        cnt++;
-        break;
-      } else /* if (*inputPos != '-') */ {
-        int n = nextNumber();
-        if (n < 0 || n + cnt > maxOutputsPerMast) {
-          Console.println(F("Too much skipped"));
-          return;
-        }
-        for (int x = 0; x < n; x++) {
-          Dcc.setCV(x + outCV, ONA);
-        }
-        cnt += n;
-        outCV+= n;
-      }
-    }
-    if (!*inputPos) {
-      break;
-    }
-    int out = nextNumber(true);
-    if (out < 1 || out > NUM_OUTPUTS) {
-      Console.println(msg_InvalidOutput);
-      return;
-    }
-    if (cnt >= maxOutputsPerMast) {
-      Console.println(F("Many outputs"));
-      return;
-    }
-    
-    if (inputDelim == '-') {
-      int to = nextNumber(false);
 
-      if (to <= out || to > NUM_OUTPUTS) {
-        Console.println(msg_InvalidOutput);
-        return;
-      }
-      if (to - out > maxOutputsPerMast) {
-        Console.println(F("Many outputs"));
-        return;
-      }
-      // Console.print("out = "); Console.print(out); Console.print(" to "); Console.println(to);
-      for (int i = out; i <= to; i++) {
-        // Console.print("Add output "); Console.println(out);
-        Dcc.setCV(outCV, out);
-        cnt++;
-        out++;
-        outCV++;
-      }
-    } else {
-      // Console.print("Add output "); Console.println(out);
-      Dcc.setCV(outCV, out);
-      cnt++;
-      outCV++;
-    }
-  }
-  while (cnt < maxOutputsPerMast) {
-      Dcc.setCV(outCV++, ONA);
-      cnt++;
-  }
+  defineRanges(1, maxOutputsPerMast, maxOutputsPerMast, NUM_OUTPUTS + 1, outCV, ONA);
 }
 
-void commandMapAspects() {
-  if (definedMast < 0) {
-    Console.println(msg_MastNotNotOpened);
-    return;
-  }
-  int nMast = definedMast - 1;
-  int cur = 0;
-  int limit = signalMastData[nMast].maxSignalCount();
-  int cvBase = START_CV_ASPECT_TABLE + nMast * maxAspects;
+void defineRanges(byte min, byte countExclusive, byte countLimitExclusive, byte limitExclusive, int cvBase, byte noValue) {
+  byte cur = 0;
   while (*inputPos) {
     if (*inputPos == ':') {
       inputPos++;
       continue;
     }
-    if (cur >= limit) {
-      Console.println(F("Too many aspects"));
+    if (cur >= countExclusive) {
+      Console.println(F("Many items"));
       return;
     }
     if (*inputPos == '-') {
       inputPos++;
       if (*inputPos == ':' || *inputPos == '-') {
-        Dcc.setCV(cvBase + cur, 255);
+        Dcc.setCV(cvBase + cur, noValue);
         cur++;
         continue;
       } else if (!*inputPos) {
-        Dcc.setCV(cvBase + cur, 255);
+        Dcc.setCV(cvBase + cur, noValue);
         cur++;
         break;
       } else /* if (*inputPos != '-') */ {
         int n = nextNumber();
-        if (n < 1 || cur + n > limit) {
-          Console.print(F("Bad len"));
+        if (n < 1 || cur + n > countExclusive) {
+          Console.print(F("Bad len: ")); Serial.println(n);
           return;
         }
         for (int x = 0; x < n; x++) {
-          Dcc.setCV(x + cur, ONA);
+          Dcc.setCV(cvBase + cur, noValue);
+          cur++;
         }
-        cur += n;
       }
-
-      if (*inputPos == '-' || *inputPos == ':' || *inputPos == 0) {
-        do {
-          Dcc.setCV(cvBase + cur, 255);
-        } while (*(inputPos++) == '-');
-        continue;
-      }
-    }
-    if (!*inputPos) {
-      break;
+      continue;
     }
     if (*inputPos == '=') {
       inputPos++;
-      cur = nextNumber();
-      if (cur < 0) {
+      int skipTo = nextNumber();
+      if (skipTo < 1 || skipTo >= countExclusive) {
         Console.print(F("Bad index"));
         return;
       }
+      skipTo--;
+      for (int x = cur; x < skipTo; x++) {
+        Dcc.setCV(cvBase + x, noValue);
+      }
+      cur = skipTo;
       continue;
     }
 
     int aspect = nextNumber(true);
-    if (aspect < 0) {
-      break;
-    }
-    if (aspect >= maxAspects) {
-      Console.print(msg_InvalidAspect);
+    if ((aspect < min) || (aspect >= limitExclusive)) {
+      Console.print(F("Bad item"));
+      return;
     }
     if (inputDelim == '-') {
       int aspectTo = nextNumber();
-      if (aspectTo < aspect || aspectTo >= maxAspects) {
+      if (aspectTo < aspect || aspectTo >= limitExclusive || (cur + aspectTo - aspect) >= countExclusive) {
         Console.println(F("Bad range"));
         return;
       }
@@ -819,6 +755,23 @@ void commandMapAspects() {
       cur++;
     }
   }
+  while (cur < countLimitExclusive) {
+      Dcc.setCV(cvBase + cur, noValue);
+      cur++;
+  }
+}
+
+void commandMapAspects() {
+  if (definedMast < 0) {
+    Console.println(msg_MastNotNotOpened);
+    return;
+  }
+  int nMast = definedMast - 1;
+  int cur = 0;
+  int limit = signalMastData[nMast].codeCount;
+  int cvBase = START_CV_ASPECT_TABLE + nMast * maxAspects;
+
+  defineRanges(0, limit, maxAspects, maxAspects + 1, cvBase, 255);
 }
 
 void commandOverride() {
